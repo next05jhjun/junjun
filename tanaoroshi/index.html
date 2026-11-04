@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>かんたん棚卸</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #677085;
+    --line: #dde1e8; --accent: #1f6feb; --accent-text: #ffffff;
+    --ok: #1a7f37; --warn: #b35900; --bad: #c62828; --hl: #fff6d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --card: #1b2029; --text: #e7eaf0; --muted: #9aa3b5;
+      --line: #2e3542; --accent: #4c8dff; --accent-text: #0b0e13;
+      --ok: #4ac26b; --warn: #f0a050; --bad: #ff6b6b; --hl: #3a3420;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    font-size: 16px; line-height: 1.5;
+  }
+  header { background: var(--card); border-bottom: 1px solid var(--line); padding: 12px 16px; position: sticky; top: 0; z-index: 5; }
+  header h1 { margin: 0; font-size: 18px; }
+  nav { display: flex; gap: 4px; margin-top: 8px; }
+  nav button { flex: 1; padding: 10px 4px; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 8px; font-size: 15px; }
+  nav button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: bold; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  section { display: none; }
+  section.active { display: block; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { margin: 0 0 8px; font-size: 16px; }
+  label { display: block; font-size: 14px; color: var(--muted); margin: 8px 0 4px; }
+  input, select { width: 100%; padding: 10px; font-size: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+  .row { display: flex; gap: 8px; align-items: flex-end; }
+  .row > * { flex: 1; }
+  .row > .narrow { flex: 0 0 96px; }
+  button.btn { padding: 12px 14px; font-size: 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: bold; }
+  button.danger { color: var(--bad); }
+  .full { width: 100%; }
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  #reader { width: 100%; border-radius: 8px; overflow: hidden; margin-top: 8px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .last { padding: 12px; border-radius: 8px; background: var(--hl); margin-top: 12px; display: none; }
+  .last .name { font-weight: bold; font-size: 18px; }
+  .last .count { font-size: 28px; font-weight: bold; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+  th { color: var(--muted); font-weight: normal; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  .table-wrap { overflow-x: auto; }
+  .qty-input { width: 72px; padding: 6px; text-align: right; }
+  .plus { color: var(--ok); } .minus { color: var(--bad); } .zero { color: var(--muted); }
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .summary div { background: var(--bg); border-radius: 8px; padding: 10px; }
+  .summary b { display: block; font-size: 20px; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); }
+  .toast.show { opacity: 1; }
+  .filter { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .filter label { display: inline-flex; align-items: center; gap: 4px; margin: 0; color: var(--text); }
+  .filter input { width: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>かんたん棚卸</h1>
+  <nav>
+    <button data-tab="count" class="active">① 数える</button>
+    <button data-tab="list">② 一覧</button>
+    <button data-tab="total">③ 集計</button>
+    <button data-tab="setting">設定</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ① 数える -->
+  <section id="tab-count" class="active">
+    <div class="card">
+      <div class="row">
+        <div><label for="staff">担当者</label><input id="staff" placeholder="例：山田"></div>
+        <div><label for="place">場所</label><input id="place" placeholder="例：倉庫A-1"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>バーコードを読む</h2>
+      <button id="camBtn" class="btn primary full">📷 カメラを起動</button>
+      <div id="reader"></div>
+      <label for="code">バーコード／品番（手入力・ハンディスキャナーもここ）</label>
+      <div class="row">
+        <input id="code" inputmode="numeric" autocomplete="off" placeholder="4901234567890">
+        <input id="qty" class="narrow" type="number" value="1" min="0" aria-label="数量">
+      </div>
+      <button id="addBtn" class="btn primary full" style="margin-top:8px">追加（Enterでも可）</button>
+      <p class="muted">同じ商品を読むたびに数量が足されます。箱単位なら数量を「12」などにしてから読んでください。</p>
+      <div id="last" class="last">
+        <div class="name" id="lastName"></div>
+        <div class="muted" id="lastCode"></div>
+        <div>合計 <span class="count" id="lastCount"></span> 個
+          <button id="undoBtn" class="btn" style="float:right">取り消し</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ② 一覧 -->
+  <section id="tab-list">
+    <div class="card">
+      <h2>数えた結果</h2>
+      <p class="muted" id="listInfo"></p>
+      <div class="table-wrap"><table id="countTable"></table></div>
+      <div class="btns">
+        <button id="exportBtn" class="btn primary">Excel用に書き出す（CSV）</button>
+        <button id="clearBtn" class="btn danger">全部消す</button>
+      </div>
+      <p class="muted">複数人で数えたときは、各自がCSVを書き出して、集計する人に送ってください。</p>
+    </div>
+  </section>
+
+  <!-- ③ 集計 -->
+  <section id="tab-total">
+    <div class="card">
+      <h2>帳簿と比べる・みんなの結果をまとめる</h2>
+      <label>他の人の棚卸CSV（複数選べます）</label>
+      <input type="file" id="mergeFiles" accept=".csv,text/csv" multiple>
+      <p class="muted" id="mergeInfo">このスマホで数えた分は自動で含まれます。</p>
+      <div class="summary" id="summary"></div>
+      <div class="filter">
+        <label><input type="radio" name="flt" value="all" checked> すべて</label>
+        <label><input type="radio" name="flt" value="diff"> 差があるもの</label>
+        <label><input type="radio" name="flt" value="uncounted"> 未カウント</label>
+      </div>
+      <div class="table-wrap"><table id="totalTable"></table></div>
+      <div class="btns">
+        <button id="exportTotalBtn" class="btn primary">集計結果を書き出す（CSV）</button>
+        <button id="clearMergeBtn" class="btn">読み込んだCSVを外す</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 設定 -->
+  <section id="tab-setting">
+    <div class="card">
+      <h2>商品マスタ（帳簿）を読み込む</h2>
+      <p class="muted">ExcelでCSV保存したファイルを選びます。列の順番：<b>バーコード, 商品名, 単価, 帳簿数</b>（1行目は見出し）。単価・帳簿数は空でもOK。</p>
+      <input type="file" id="masterFile" accept=".csv,text/csv">
+      <p class="muted" id="masterInfo"></p>
+      <div class="btns">
+        <button id="sampleBtn" class="btn">見本CSVをダウンロード</button>
+        <button id="clearMasterBtn" class="btn danger">マスタを消す</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>データの保存場所</h2>
+      <p class="muted">入力したデータは<b>このスマホ（ブラウザ）の中だけ</b>に保存され、インターネットには送信されません。ブラウザの履歴やデータを消すと消えるので、終わったら必ずCSVに書き出してください。</p>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const KEY = 'tanaoroshi-v1';
+
+  // ---------- 保存データ ----------
+  // counts: { code: { qty, places: {place: qty}, updated } }
+  let state = { staff: '', place: '', counts: {}, master: {}, history: [] };
+  let merged = []; // [{file, rows:[{code,name,qty,staff,place}]}]
+
+  function load() {
+    try { const s = JSON.parse(localStorage.getItem(KEY)); if (s) state = Object.assign(state, s); } catch (e) {}
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { toast('保存できませんでした（容量不足など）'); }
+  }
+
+  function toast(msg) {
+    const t = $('toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove('show'), 1800);
+  }
+  function beep() {
+    try {
+      const ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)());
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = 1200; g.gain.value = 0.1; o.connect(g); g.connect(ctx.destination);
+      o.start(); o.stop(ctx.currentTime + 0.08);
+    } catch (e) {}
+    if (navigator.vibrate) navigator.vibrate(60);
+  }
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const yen = (n) => (Math.round(n)).toLocaleString('ja-JP') + '円';
+  const nameOf = (code) => (state.master[code] && state.master[code].name) || '（マスタに無い商品）';
+
+  // ---------- タブ ----------
+  document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === b));
+    document.querySelectorAll('section').forEach(s => s.classList.toggle('active', s.id === 'tab-' + b.dataset.tab));
+    if (b.dataset.tab !== 'count') stopCamera();
+    render();
+  }));
+
+  // ---------- 数える ----------
+  $('staff').value = state.staff; $('place').value = state.place;
+  $('staff').addEventListener('input', e => { state.staff = e.target.value; save(); });
+  $('place').addEventListener('input', e => { state.place = e.target.value; save(); });
+
+  function addCount(code, qty) {
+    code = String(code).trim();
+    if (!code) return;
+    qty = Number(qty);
+    if (!Number.isFinite(qty)) qty = 1;
+    const place = state.place.trim() || '（場所なし）';
+    const c = state.counts[code] || (state.counts[code] = { qty: 0, places: {} });
+    c.qty += qty;
+    c.places[place] = (c.places[place] || 0) + qty;
+    c.updated = Date.now();
+    state.history.push({ code, qty, place });
+    if (state.history.length > 200) state.history.shift();
+    save();
+    beep();
+    $('last').style.display = 'block';
+    $('lastName').textContent = nameOf(code);
+    $('lastCode').textContent = code + (qty !== 1 ? `（+${qty}）` : '');
+    $('lastCount').textContent = c.qty;
+  }
+
+  function addFromInput() {
+    const code = $('code').value;
+    if (!code.trim()) { $('code').focus(); return; }
+    addCount(code, $('qty').value);
+    $('code').value = '';
+    $('code').focus();
+  }
+  $('addBtn').addEventListener('click', addFromInput);
+  $('code').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addFromInput(); } });
+
+  $('undoBtn').addEventListener('click', () => {
+    const h = state.history.pop();
+    if (!h) return;
+    const c = state.counts[h.code];
+    if (c) {
+      c.qty -= h.qty;
+      c.places[h.place] = (c.places[h.place] || 0) - h.qty;
+      if (!c.places[h.place]) delete c.places[h.place];
+      if (c.qty === 0 && !Object.keys(c.places).length) delete state.counts[h.code];
+    }
+    save();
+    $('lastName').textContent = '取り消しました：' + nameOf(h.code);
+    $('lastCode').textContent = h.code;
+    $('lastCount').textContent = c ? c.qty : 0;
+  });
+
+  // カメラ
+  let scanner = null, lastScan = { code: '', at: 0 };
+  async function startCamera() {
+    if (!window.Html5Qrcode) { toast('読み取り機能を読み込めませんでした。通信を確認してください'); return; }
+    const F = Html5QrcodeSupportedFormats;
+    scanner = new Html5Qrcode('reader', { formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.ITF, F.QR_CODE], verbose: false });
+    try {
+      await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 260, height: 140 } }, (text) => {
+        const now = Date.now();
+        // 同じバーコードを連続で拾わないよう1.5秒あける
+        if (text === lastScan.code && now - lastScan.at < 1500) return;
+        lastScan = { code: text, at: now };
+        addCount(text, $('qty').value);
+      });
+      $('camBtn').textContent = '■ カメラを止める';
+    } catch (e) {
+      scanner = null;
+      toast('カメラを使えませんでした。ブラウザでカメラを許可してください');
+    }
+  }
+  async function stopCamera() {
+    if (!scanner) return;
+    try { await scanner.stop(); scanner.clear(); } catch (e) {}
+    scanner = null;
+    $('camBtn').textContent = '📷 カメラを起動';
+  }
+  $('camBtn').addEventListener('click', () => scanner ? stopCamera() : startCamera());
+
+  // ---------- 一覧 ----------
+  function renderList() {
+    const codes = Object.keys(state.counts).sort((a, b) => (state.counts[b].updated || 0) - (state.counts[a].updated || 0));
+    const total = codes.reduce((s, c) => s + state.counts[c].qty, 0);
+    $('listInfo').textContent = `${codes.length} 品目 / 合計 ${total} 個`;
+    if (!codes.length) { $('countTable').innerHTML = '<tr><td class="muted">まだ数えていません。「① 数える」から始めてください。</td></tr>'; return; }
+    $('countTable').innerHTML = '<tr><th>商品</th><th>場所</th><th class="num">数量</th><th></th></tr>' + codes.map(code => {
+      const c = state.counts[code];
+      const places = Object.entries(c.places).map(([p, q]) => `${esc(p)}:${q}`).join(' / ');
+      return `<tr><td>${esc(nameOf(code))}<br><span class="muted">${esc(code)}</span></td>
+        <td class="muted">${places}</td>
+        <td class="num"><input class="qty-input" type="number" value="${c.qty}" data-code="${esc(code)}"></td>
+        <td><button class="btn danger" data-del="${esc(code)}" aria-label="削除">✕</button></td></tr>`;
+    }).join('');
+  }
+  $('countTable').addEventListener('change', e => {
+    const code = e.target.dataset.code; if (code === undefined) return;
+    const c = state.counts[code]; const v = Number(e.target.value);
+    if (!c || !Number.isFinite(v)) return;
+    // 手で直した分は「手修正」として場所ごとの内訳を調整
+    const diff = v - c.qty;
+    c.qty = v; c.places['手修正'] = (c.places['手修正'] || 0) + diff;
+    if (!c.places['手修正']) delete c.places['手修正'];
+    c.updated = Date.now(); save(); renderList();
+  });
+  $('countTable').addEventListener('click', e => {
+    const code = e.target.dataset.del; if (code === undefined) return;
+    if (confirm(`「${nameOf(code)}」を消しますか？`)) { delete state.counts[code]; save(); renderList(); }
+  });
+  $('clearBtn').addEventListener('click', () => {
+    if (!Object.keys(state.counts).length) return;
+    if (confirm('数えた結果を全部消します。先にCSVを書き出しましたか？')) { state.counts = {}; state.history = []; save(); renderList(); }
+  });
+
+  // ---------- CSV ----------
+  function toCSV(rows) {
+    return '﻿' + rows.map(r => r.map(v => {
+      const s = String(v ?? '');
+      return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }).join(',')).join('\r\n');
+  }
+  function download(name, text) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  function parseCSV(text) {
+    const rows = []; let row = [], field = '', q = false;
+    text = text.replace(/^﻿/, '');
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) {
+        if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; }
+        else field += ch;
+      } else if (ch === '"') q = true;
+      else if (ch === ',') { row.push(field); field = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i + 1] === '\n') i++;
+        row.push(field); rows.push(row); row = []; field = '';
+      } else field += ch;
+    }
+    if (field || row.length) { row.push(field); rows.push(row); }
+    return rows.filter(r => r.some(v => v.trim() !== ''));
+  }
+  async function readText(file) {
+    const buf = await file.arrayBuffer();
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+    catch (e) { return new TextDecoder('shift_jis').decode(buf); } // Excelの日本語CSV対策
+  }
+  const num = (v) => { const n = Number(String(v ?? '').replace(/[,円¥\s]/g, '')); return Number.isFinite(n) ? n : 0; };
+  const stamp = () => { const d = new Date(), p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`; };
+
+  $('exportBtn').addEventListener('click', () => {
+    const rows = [['バーコード', '商品名', '数量', '場所', '担当者']];
+    for (const [code, c] of Object.entries(state.counts)) {
+      for (const [place, q] of Object.entries(c.places)) if (q) rows.push([code, nameOf(code), q, place, state.staff]);
+    }
+    if (rows.length === 1) { toast('書き出すデータがありません'); return; }
+    download(`棚卸_${state.staff || '担当者'}_${stamp()}.csv`, toCSV(rows));
+  });
+
+  // ---------- マスタ ----------
+  function renderMasterInfo() {
+    const n = Object.keys(state.master).length;
+    $('masterInfo').textContent = n ? `${n} 商品を読み込み済み` : 'まだ読み込んでいません（無くても数えることはできます）';
+  }
+  $('masterFile').addEventListener('change', async e => {
+    const f = e.target.files[0]; if (!f) return;
+    const rows = parseCSV(await readText(f));
+    const header = rows[0] || [];
+    const hasHeader = header.length && !/^\d{6,}$/.test(String(header[0]).trim());
+    const master = {};
+    for (const r of rows.slice(hasHeader ? 1 : 0)) {
+      const code = String(r[0] ?? '').trim(); if (!code) continue;
+      master[code] = { name: (r[1] || '').trim(), price: num(r[2]), book: r[3] === undefined || String(r[3]).trim() === '' ? null : num(r[3]) };
+    }
+    state.master = master; save(); renderMasterInfo();
+    toast(`${Object.keys(master).length} 商品を読み込みました`);
+    e.target.value = '';
+  });
+  $('clearMasterBtn').addEventListener('click', () => { if (confirm('商品マスタを消しますか？')) { state.master = {}; save(); renderMasterInfo(); } });
+  $('sampleBtn').addEventListener('click', () => download('商品マスタ_見本.csv', toCSV([
+    ['バーコード', '商品名', '単価', '帳簿数'],
+    ['4901234567890', 'サンプル商品A', 120, 30],
+    ['4909876543210', 'サンプル商品B', 980, 5],
+  ])));
+
+  // ---------- 集計 ----------
+  $('mergeFiles').addEventListener('change', async e => {
+    for (const f of e.target.files) {
+      const rows = parseCSV(await readText(f)).slice(1)
+        .map(r => ({ code: String(r[0] ?? '').trim(), name: r[1], qty: num(r[2]), place: r[3], staff: r[4] }))
+        .filter(r => r.code);
+      merged.push({ file: f.name, rows });
+    }
+    e.target.value = '';
+    renderTotal();
+  });
+  $('clearMergeBtn').addEventListener('click', () => { merged = []; renderTotal(); });
+  document.querySelectorAll('input[name=flt]').forEach(r => r.addEventListener('change', renderTotal));
+
+  function buildTotal() {
+    const map = {};
+    const get = (code) => map[code] || (map[code] = { code, name: '', qty: 0, counted: false });
+    for (const [code, c] of Object.entries(state.counts)) { const t = get(code); t.qty += c.qty; t.counted = true; }
+    for (const m of merged) for (const r of m.rows) { const t = get(r.code); t.qty += r.qty; t.counted = true; if (!t.name) t.name = r.name; }
+    for (const code of Object.keys(state.master)) get(code);
+    return Object.values(map).map(t => {
+      const m = state.master[t.code] || {};
+      const price = m.price || 0, book = m.book ?? null;
+      const diff = book === null ? null : t.qty - book;
+      return { ...t, name: m.name || t.name || '（マスタに無い商品）', price, book, diff, amount: t.qty * price, diffAmount: diff === null ? null : diff * price };
+    }).sort((a, b) => Math.abs(b.diffAmount || 0) - Math.abs(a.diffAmount || 0) || a.code.localeCompare(b.code));
+  }
+
+  function renderTotal() {
+    $('mergeInfo').textContent = merged.length
+      ? `このスマホの分 ＋ ${merged.map(m => m.file).join('、')}`
+      : 'このスマホで数えた分は自動で含まれます。';
+    const all = buildTotal();
+    const amount = all.reduce((s, t) => s + t.amount, 0);
+    const diffAmount = all.reduce((s, t) => s + (t.diffAmount || 0), 0);
+    const diffCount = all.filter(t => t.diff).length;
+    const uncounted = all.filter(t => !t.counted).length;
+    $('summary').innerHTML = `
+      <div>在庫金額<b>${yen(amount)}</b></div>
+      <div>差額（実数−帳簿）<b class="${diffAmount > 0 ? 'plus' : diffAmount < 0 ? 'minus' : ''}">${diffAmount > 0 ? '+' : ''}${yen(diffAmount)}</b></div>
+      <div>差がある品目<b>${diffCount}</b></div>
+      <div>未カウント<b>${uncounted}</b></div>`;
+    const flt = document.querySelector('input[name=flt]:checked').value;
+    const rows = all.filter(t => flt === 'all' || (flt === 'diff' ? t.diff : !t.counted));
+    if (!all.length) { $('totalTable').innerHTML = '<tr><td class="muted">データがありません。設定で商品マスタを読み込むと、帳簿との差がわかります。</td></tr>'; return; }
+    $('totalTable').innerHTML = '<tr><th>商品</th><th class="num">実数</th><th class="num">帳簿</th><th class="num">差</th><th class="num">差額</th></tr>' +
+      rows.map(t => {
+        const cls = t.diff > 0 ? 'plus' : t.diff < 0 ? 'minus' : 'zero';
+        return `<tr><td>${esc(t.name)}<br><span class="muted">${esc(t.code)}</span></td>
+          <td class="num">${t.counted ? t.qty : '<span class="muted">未</span>'}</td>
+          <td class="num">${t.book ?? '-'}</td>
+          <td class="num ${cls}">${t.diff === null ? '-' : (t.diff > 0 ? '+' : '') + t.diff}</td>
+          <td class="num ${cls}">${t.diffAmount === null ? '-' : yen(t.diffAmount)}</td></tr>`;
+      }).join('');
+  }
+  $('exportTotalBtn').addEventListener('click', () => {
+    const rows = [['バーコード', '商品名', '実数', '帳簿数', '差', '単価', '在庫金額', '差額']];
+    for (const t of buildTotal()) rows.push([t.code, t.name, t.counted ? t.qty : '', t.book ?? '', t.diff ?? '', t.price, t.amount, t.diffAmount ?? '']);
+    download(`棚卸集計_${stamp()}.csv`, toCSV(rows));
+  });
+
+  function render() { renderList(); renderTotal(); renderMasterInfo(); }
+  load();
+  $('staff').value = state.staff; $('place').value = state.place;
+  render();
+})();
+</script>
+</body>
+</html>
