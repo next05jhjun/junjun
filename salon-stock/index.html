@@ -114,7 +114,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 3.0</small><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 3.1</small><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -187,6 +187,11 @@
         <button id="rSave" class="btn primary">この納品書を保存</button>
         <button id="rClear" class="btn danger">やり直す</button>
       </div>
+    </div>
+    <div class="card">
+      <h2>仕入先ごとの請求の見込み</h2>
+      <p class="muted">仕入先ごとに締日を選ぶと、納品日をもとに次回の請求金額の見込みを出します。届いた請求書との照らし合わせにも使えます。</p>
+      <div id="billing"></div>
     </div>
     <div class="card">
       <h2>これまでの入庫</h2>
@@ -333,7 +338,7 @@
   // ---------- 保存データ ----------
   // counts: { code: { qty, places: {place: qty}, updated } }
   let state = { staff: '', place: '', counts: {}, master: {}, history: [], lookup: {}, opt: { auto: false, lookup: true }, rk: { appId: '', accessKey: '' },
-    receipts: [], draft: { date: '', supplier: '', slip: '', lines: [], photo: '' }, closes: [], sales: '' };
+    receipts: [], suppliers: {}, draft: { date: '', supplier: '', slip: '', lines: [], photo: '' }, closes: [], sales: '' };
   let merged = []; // [{file, rows:[{code,name,qty,staff,place}]}]
 
   function load() {
@@ -1133,6 +1138,7 @@
       $('rTotal').textContent = `${d.lines.length} 品目 / ${qty} 個 / 合計 ${yen(slipAmount(d))}` + (noPrice ? `（単価なし ${noPrice} 品目）` : '');
     }
     renderRecvHistory();
+    renderBilling();
   }
   $('rDate').addEventListener('change', e => { state.draft.date = e.target.value; save(); });
   $('rSupplier').addEventListener('input', e => { state.draft.supplier = e.target.value; save(); });
@@ -1297,6 +1303,43 @@
     save(); render(); toast('確定を取り消しました');
   }
 
+
+  // ========== 仕入先の締日と請求の見込み ==========
+  const CLOSE_OPTS = [['', '締日を選ぶ'], ['5', '5日'], ['10', '10日'], ['15', '15日'], ['20', '20日'], ['25', '25日'], ['31', '末日']];
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // その月の締め日（31＝末日。月の日数より大きければ末日）
+  const closeIn = (y, m, day) => new Date(y, m, Math.min(day, new Date(y, m + 1, 0).getDate()));
+  function billingPeriods(day, base = new Date()) {
+    const t = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+    let end = closeIn(t.getFullYear(), t.getMonth(), day);
+    if (end < t) end = closeIn(t.getFullYear(), t.getMonth() + 1, day);
+    const prevEnd = closeIn(end.getFullYear(), end.getMonth() - 1, day);
+    const prevPrevEnd = closeIn(end.getFullYear(), end.getMonth() - 2, day);
+    const next = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    return { cur: [ymd(next(prevEnd)), ymd(end)], last: [ymd(next(prevPrevEnd)), ymd(prevEnd)] };
+  }
+  const sumBetween = (sup, [a, b]) => state.receipts.filter(r => (r.supplier || '（仕入先なし）') === sup && r.date >= a && r.date <= b).reduce((s, r) => s + slipAmount(r), 0);
+  function renderBilling() {
+    const sups = uniq(state.receipts.map(r => r.supplier || '（仕入先なし）'));
+    if (!sups.length) { $('billing').innerHTML = '<p class="muted">納品書を保存すると、仕入先がここに並びます。</p>'; return; }
+    $('billing').innerHTML = sups.map(sup => {
+      const day = Number((state.suppliers[sup] || {}).close) || 0;
+      const sel = `<select data-closefor="${esc(sup)}" style="width:auto;padding:6px">${CLOSE_OPTS.map(([v, l]) => `<option value="${v}" ${String(day || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+      let body = '<p class="muted" style="margin:4px 0 0">締日を選ぶと請求の見込みが出ます。</p>';
+      if (day) {
+        const { cur, last } = billingPeriods(day);
+        body = `<div class="catsum" style="margin:6px 0 0">
+          <span>次回の請求（${md(cur[1])}締め）見込み：<b>${yen(sumBetween(sup, cur))}</b><br><span class="muted">${md(cur[0])}〜${md(cur[1])}の納品</span></span>
+          <span>前回（${md(last[1])}締め）：<b>${yen(sumBetween(sup, last))}</b><br><span class="muted">${md(last[0])}〜${md(last[1])}の納品</span></span></div>`;
+      }
+      return `<div style="border-top:1px solid var(--line);padding:10px 0"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>${esc(sup)}</b>${sel}</div>${body}</div>`;
+    }).join('');
+  }
+  $('billing').addEventListener('change', e => {
+    const sup = e.target.dataset.closefor; if (sup === undefined) return;
+    state.suppliers[sup] = Object.assign({}, state.suppliers[sup], { close: e.target.value });
+    save(); renderBilling();
+  });
   function render() { renderList(); renderTotal(); renderMasterInfo(); renderRecv(); }
   load();
   showDraftPhoto();
