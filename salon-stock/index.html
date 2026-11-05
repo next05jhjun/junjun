@@ -114,7 +114,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 2.0</small><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 2.1</small><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">① 数える</button>
     <button data-tab="list">② 一覧</button>
@@ -376,7 +376,10 @@
   ];
   let rkLastError = '';
   // サロンストック共通の楽天アプリID（許可されたWebサイトからしか使えない設定）
-  const RK_DEFAULT = { appId: '__RK_APP_ID__', accessKey: '__RK_ACCESS_KEY__' };
+  const RK_DEFAULT = { appId: 'c5d84ffa-3c5a-4b17-8645-09df0df00410', accessKey: 'pk_WwmP7Nsdxkb5lDctm5oM3WSD0pum5aCXPbwdNAX8vtM' };
+  // 楽天アフィリエイトID（楽天で見るリンクに付ける。PR表記あり）
+  const RK_AFF = '592a0b0b.47d1ea90.592a0b0c.2803680e';
+  const affLink = (url) => `https://hb.afl.rakuten.co.jp/hgc/${RK_AFF}/?pc=${encodeURIComponent(url)}&m=${encodeURIComponent(url)}`;
   const rkCred = () => (state.rk && state.rk.appId) ? state.rk : (RK_DEFAULT.appId.startsWith('__') ? { appId: '' } : RK_DEFAULT);
   const rkReady = () => !!rkCred().appId;
   function cleanName(n) {
@@ -389,6 +392,7 @@
     const cred = rkCred();
     const qs = new URLSearchParams({ applicationId: cred.appId.trim(), keyword, hits: '10', format: 'json', formatVersion: '2' });
     if (cred.accessKey && cred.accessKey.trim()) qs.set('accessKey', cred.accessKey.trim());
+    qs.set('affiliateId', RK_AFF);
     const order = state.rk.ep ? [state.rk.ep, ...RK_ENDPOINTS.filter(u => u !== state.rk.ep)] : RK_ENDPOINTS;
     const errs = [];
     for (const url of order) {
@@ -403,7 +407,7 @@
         state.rk.ep = url; save();
         const items = (j.Items || []).map(x => x.Item || x).map(it => {
           const im = (it.mediumImageUrls || it.smallImageUrls || [])[0];
-          return { name: cleanName(it.itemName), img: typeof im === 'string' ? im : (im && im.imageUrl) || '' };
+          return { name: cleanName(it.itemName), img: typeof im === 'string' ? im : (im && im.imageUrl) || '', url: it.affiliateUrl || (it.itemUrl ? affLink(it.itemUrl) : '') };
         }).filter(x => x.name);
         rkLastError = '';
         return { items };
@@ -437,7 +441,7 @@
       if (res.error) failed = true;
       if (res.items.length) {
         const cands = uniq(res.items.map(x => x.name)).slice(0, 5);
-        info = { name: cands[0], img: res.items[0].img, cands, src: '楽天市場' };
+        info = { name: cands[0], img: res.items[0].img, url: res.items[0].url, cands, src: '楽天市場' };
       }
     }
     if (info || !failed) { state.lookup[code] = info; save(); } // 通信エラーのときは覚えずに次回また調べる
@@ -448,7 +452,7 @@
     return `<div class="links">
       <a href="https://www.google.com/search?q=${q}" target="_blank" rel="noopener">Googleで調べる</a>
       <a href="https://www.amazon.co.jp/s?k=${q}" target="_blank" rel="noopener">Amazon</a>
-      <a href="https://search.rakuten.co.jp/search/mall/${q}/" target="_blank" rel="noopener">楽天</a>
+      <a href="${affLink(`https://search.rakuten.co.jp/search/mall/${q}/`)}" target="_blank" rel="noopener sponsored">楽天（PR）</a>
       <a href="https://shopping.yahoo.co.jp/search?p=${q}" target="_blank" rel="noopener">Yahoo!ショッピング</a></div>`;
   }
   async function renderInfo(el, code) {
@@ -467,6 +471,7 @@
         <div><div class="muted">ネットの商品情報（${esc(info.src || '')}）</div><div class="nm">${esc(info.name)}</div>
         ${known ? '' : `<button class="btn" data-savename="${esc(code)}" data-name="${esc(info.name)}" style="margin-top:6px">この名前で登録</button>`}</div></div>`;
       if (!known && info.cands && info.cands.length > 1) html += `<p class="muted" style="margin:6px 0 0">ほかの候補（タップで下の欄に入ります）</p>` + chips(info.cands);
+      if (info.url) html += `<div class="links"><a href="${esc(info.url)}" target="_blank" rel="noopener sponsored">🛒 楽天でこの商品を見る（PR）</a></div>`;
       if (info.src === '楽天市場') html += RK_CREDIT;
     }
     if (!known) {
