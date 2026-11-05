@@ -114,7 +114,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 2.1</small><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 2.2</small><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">① 数える</button>
     <button data-tab="list">② 一覧</button>
@@ -981,6 +981,12 @@
   });
   render();
 })();
+</script>
+<script>
+  // 電波がなくても開けるようにする
+  if ('serviceWorker' in navigator && location.protocol === 'https:' || location.hostname === 'localhost') {
+    navigator.serviceWorker && navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
 </script>
 </body>
 </html>
