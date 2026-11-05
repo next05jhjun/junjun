@@ -114,7 +114,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 3.1</small><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 3.2</small><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -275,6 +275,8 @@
       <p class="muted">オフ（おすすめ）だと、1つ読むたびに止まり「次を読む」を押すまで数えません。数えすぎを防げます。</p>
       <label class="check"><input type="checkbox" id="optLookup"> バーコードから品名を自動で調べる</label>
       <p class="muted">バーコードの番号で<b>楽天市場</b>を検索し、品名と画像を表示します。見つからないときは、食品・日用品のデータベース（Open Food Facts）も調べます。送るのはバーコードの番号だけで、数量や金額は送りません。サロン専売品など、ネットで売られていない商品は見つからないことがあります。</p>
+      <label class="check"><input type="checkbox" id="optShare"> 登録した品名を、ほかのサロンと共有する（みんなの品名データベース）</label>
+      <p class="muted">品名を登録すると、<b>バーコード・品名・種類だけ</b>が共有され、ほかのサロンでも読むだけで品名が出るようになります。数量・金額・仕入先などのお店の情報は共有しません。オフにすると、共有の登録も参照もしません。</p>
       <p class="muted">📷で品名を撮影したときの文字の読み取りは、スマホの中だけで行います。写真はどこにも送りません（初回だけ読み取り用の辞書を約3MBダウンロードします）。</p>
     </div>
     <div class="card">
@@ -295,7 +297,7 @@
     </div>
     <div class="card">
       <h2>データの保存場所</h2>
-      <p class="muted">入力したデータは<b>このスマホ（ブラウザ）の中だけ</b>に保存され、インターネットには送信されません。（品名を調べるときは、バーコードの番号や読み取った品名の文字だけを楽天市場などに送ります）。ブラウザの履歴やデータを消すと消えるので、終わったら必ずCSVに書き出してください。</p>
+      <p class="muted">入力したデータは<b>このスマホ（ブラウザ）の中だけ</b>に保存され、インターネットには送信されません。（品名を調べるときは、バーコードの番号や読み取った品名の文字だけを楽天市場などに送ります。登録した品名は、設定がオンならバーコード・品名・種類だけを、みんなの品名データベースに共有します）。ブラウザの履歴やデータを消すと消えるので、終わったら必ずCSVに書き出してください。</p>
     </div>
   </section>
 </main>
@@ -337,7 +339,7 @@
 
   // ---------- 保存データ ----------
   // counts: { code: { qty, places: {place: qty}, updated } }
-  let state = { staff: '', place: '', counts: {}, master: {}, history: [], lookup: {}, opt: { auto: false, lookup: true }, rk: { appId: '', accessKey: '' },
+  let state = { staff: '', place: '', counts: {}, master: {}, history: [], lookup: {}, opt: { auto: false, lookup: true, share: true }, rk: { appId: '', accessKey: '' },
     receipts: [], suppliers: {}, draft: { date: '', supplier: '', slip: '', lines: [], photo: '' }, closes: [], sales: '' };
   let merged = []; // [{file, rows:[{code,name,qty,staff,place}]}]
 
@@ -370,6 +372,7 @@
     const m = state.master[code] || (state.master[code] = { name: '', price: 0, book: null });
     m.cat = m.cat === cat ? '' : cat; // 同じものをもう一度押すと解除
     save();
+    if (m.name) shareName(code);
   }
   function catButtons(code) {
     const cur = catOf(code);
@@ -489,22 +492,101 @@
   }
   const uniq = (a) => [...new Set(a)];
 
+  // ========== みんなの品名データベース（Firebase / Firestore） ==========
+  // 共有するのは「バーコード・品名・種類」だけ。各ユーザーは自分の登録だけを書き換えられる
+  const FB = { apiKey: 'AIzaSyCXXj-QF-MHvDxMqgB5-qU60GBJ0aMYTDM', projectId: 'salon-stock-fbd9b' };
+  const FS = `https://firestore.googleapis.com/v1/projects/${FB.projectId}/databases/(default)/documents`;
+  const AUTH_KEY = 'salon-stock-auth';
+  const withTimeout = (ms) => { const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; };
+  let authP = null;
+  async function fbAuth() {
+    let a = null; try { a = JSON.parse(localStorage.getItem(AUTH_KEY)); } catch (e) {}
+    if (a && a.idToken && a.exp - 60000 > Date.now()) return a;
+    if (authP) return authP;
+    authP = (async () => {
+      let r, j;
+      if (a && a.refreshToken) { // 期限切れなら更新
+        r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${FB.apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(a.refreshToken), signal: withTimeout(8000) });
+        j = await r.json();
+        if (r.ok) a = { idToken: j.id_token, refreshToken: j.refresh_token, uid: j.user_id, exp: Date.now() + Number(j.expires_in) * 1000 };
+        else a = null;
+      }
+      if (!a) { // 初回は匿名で登録（使う人の操作は不要）
+        r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${FB.apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ returnSecureToken: true }), signal: withTimeout(8000) });
+        j = await r.json();
+        if (!r.ok) throw new Error('auth ' + r.status + ' ' + JSON.stringify(j.error || j).slice(0, 120));
+        a = { idToken: j.idToken, refreshToken: j.refreshToken, uid: j.localId, exp: Date.now() + Number(j.expiresIn) * 1000 };
+      }
+      try { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); } catch (e) {}
+      return a;
+    })().finally(() => { authP = null; });
+    return authP;
+  }
+  // そのバーコードに、みんなが登録した品名（多い順）
+  async function sharedNames(code) {
+    if (!state.opt.share || !isJan(code) || !navigator.onLine) return [];
+    try {
+      const a = await fbAuth();
+      const r = await fetch(`${FS}/products/${code}/names?pageSize=100`, { headers: { Authorization: 'Bearer ' + a.idToken }, signal: withTimeout(6000) });
+      if (!r.ok) return [];
+      const j = await r.json();
+      const tally = {};
+      for (const d of j.documents || []) {
+        const f = d.fields || {}, n = cleanName(f.name && f.name.stringValue), c = (f.cat && f.cat.stringValue) || '';
+        if (!n) continue;
+        const t = tally[n] || (tally[n] = { name: n, n: 0, cats: {} });
+        t.n++; if (c) t.cats[c] = (t.cats[c] || 0) + 1;
+      }
+      return Object.values(tally).sort((x, y) => y.n - x.n)
+        .map(t => ({ name: t.name, n: t.n, cat: Object.entries(t.cats).sort((x, y) => y[1] - x[1]).map(x => x[0])[0] || '' }));
+    } catch (e) { return []; }
+  }
+  // 自分の登録を共有（届かなかったものは次の機会にまとめて送る）
+  function shareName(code) {
+    if (!state.opt.share || !isJan(code)) return;
+    const m = state.master[code]; if (!m || !m.name) return;
+    state.shareQ = uniq([...(state.shareQ || []), code]); save();
+    flushShare();
+  }
+  let flushing = false;
+  async function flushShare() {
+    if (flushing || !state.opt.share || !navigator.onLine || !(state.shareQ || []).length) return;
+    flushing = true;
+    try {
+      const a = await fbAuth();
+      for (const code of state.shareQ.slice()) {
+        const m = state.master[code];
+        if (m && m.name) {
+          const body = { fields: { name: { stringValue: m.name.slice(0, 80) }, cat: { stringValue: (m.cat || '').slice(0, 20) }, at: { timestampValue: new Date().toISOString() } } };
+          const r = await fetch(`${FS}/products/${code}/names/${a.uid}`, { method: 'PATCH', headers: { Authorization: 'Bearer ' + a.idToken, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: withTimeout(8000) });
+          if (!r.ok) break;
+        }
+        state.shareQ = state.shareQ.filter(c => c !== code); save();
+        delete state.lookup[code]; // 次に読んだとき最新の共有情報を見る
+      }
+    } catch (e) {} finally { flushing = false; }
+  }
+  window.addEventListener('online', flushShare);
+
   const pending = {};
+  const MISS_TTL = 24 * 3600 * 1000; // 見つからなかった商品は1日たったら調べ直す
   function lookup(code) {
-    if (code in state.lookup) return Promise.resolve(state.lookup[code]);
+    if (code in state.lookup && (state.lookup[code] || Date.now() - ((state.lookupAt || {})[code] || 0) < MISS_TTL)) return Promise.resolve(state.lookup[code]);
     // 同じ商品を同時に何度も問い合わせない
     return pending[code] || (pending[code] = lookupNet(code).finally(() => delete pending[code]));
   }
   async function lookupNet(code) {
     if (!state.opt.lookup || !isJan(code) || !navigator.onLine) return null;
     let info = null, failed = false;
-    if (rkReady()) { // 楽天市場を先に調べる
-      const res = await rakutenSearch(code);
-      if (res.error) failed = true;
-      if (res.items.length) {
-        const cands = uniq(res.items.map(x => x.name)).slice(0, 5);
-        info = { name: cands[0], img: res.items[0].img, url: res.items[0].url, cands, src: '楽天市場' };
-      }
+    // みんなの登録と楽天市場を同時に調べる（速さのため）
+    const [shared, res] = await Promise.all([sharedNames(code), rkReady() ? rakutenSearch(code) : Promise.resolve({ items: [] })]);
+    if (res.error) failed = true;
+    const rk = res.items.length ? { names: uniq(res.items.map(x => x.name)), img: res.items[0].img, url: res.items[0].url } : null;
+    if (shared.length) {
+      info = { name: shared[0].name, cat: shared[0].cat, img: rk ? rk.img : '', url: rk ? rk.url : '',
+        cands: uniq([...shared.map(x => x.name), ...(rk ? rk.names : [])]).slice(0, 6), src: `みんなの登録・${shared[0].n}件` };
+    } else if (rk) {
+      info = { name: rk.names[0], img: rk.img, url: rk.url, cands: rk.names.slice(0, 5), src: '楽天市場' };
     }
     if (!info) try { // 見つからなければ食品・日用品のデータベース
       const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_ja,brands,image_small_url,image_front_small_url`);
@@ -513,7 +595,11 @@
       if (p) info = { name: [p.brands, p.product_name_ja || p.product_name].filter(Boolean).join(' '), img: p.image_front_small_url || p.image_small_url || '', src: 'Open Food Facts' };
       if (info && !info.name) info = null;
     } catch (e) { failed = true; }
-    if (info || !failed) { state.lookup[code] = info; save(); } // 通信エラーのときは覚えずに次回また調べる
+    if (info || !failed) { // 通信エラーのときは覚えずに次回また調べる
+      state.lookup[code] = info;
+      state.lookupAt = state.lookupAt || {}; if (!info) state.lookupAt[code] = Date.now(); else delete state.lookupAt[code];
+      save();
+    }
     return info;
   }
   function links(code) {
@@ -538,7 +624,7 @@
     if (info) {
       html += `<div class="info">${info.img ? `<img src="${esc(info.img)}" alt="">` : ''}
         <div><div class="muted">ネットの商品情報（${esc(info.src || '')}）</div><div class="nm">${esc(info.name)}</div>
-        ${known ? '' : `<button class="btn" data-savename="${esc(code)}" data-name="${esc(info.name)}" style="margin-top:6px">この名前で登録</button>`}</div></div>`;
+        ${known ? '' : `<button class="btn" data-savename="${esc(code)}" data-name="${esc(info.name)}" data-cat="${esc(info.cat || '')}" style="margin-top:6px">この名前で登録${info.cat ? `（${esc(info.cat)}）` : ''}</button>`}</div></div>`;
       if (!known && info.cands && info.cands.length > 1) html += `<p class="muted" style="margin:6px 0 0">ほかの候補（タップで下の欄に入ります）</p>` + chips(info.cands);
       if (info.url) html += `<div class="links"><a href="${esc(info.url)}" target="_blank" rel="noopener sponsored">🛒 楽天でこの商品を見る（PR）</a></div>`;
       if (info.src === '楽天市場') html += RK_CREDIT;
@@ -753,7 +839,9 @@
     if (name === undefined) { const inp = e.target.closest('.namerow') && e.target.closest('.namerow').querySelector('[data-nameinput]'); name = inp ? inp.value.trim() : ''; }
     if (!name) { toast('商品名を入力してください'); return; }
     state.master[code] = Object.assign({ price: 0, book: null }, state.master[code], { name });
+    const sc = e.target.dataset.cat; if (sc && !state.master[code].cat) state.master[code].cat = sc;
     save(); toast('登録しました：' + name);
+    shareName(code);
     $('lastName').textContent = name;
     if ($('hit').classList.contains('show')) showHit(code);
     renderInfo($('lastInfo'), code);
@@ -1347,6 +1435,10 @@
   $('optAuto').checked = state.opt.auto; $('optLookup').checked = state.opt.lookup;
   $('optAuto').addEventListener('change', e => { state.opt.auto = e.target.checked; save(); });
   $('optLookup').addEventListener('change', e => { state.opt.lookup = e.target.checked; save(); });
+  if (state.opt.share === undefined) state.opt.share = true;
+  $('optShare').checked = state.opt.share;
+  $('optShare').addEventListener('change', e => { state.opt.share = e.target.checked; save(); if (state.opt.share) flushShare(); });
+  setTimeout(flushShare, 3000);
   state.rk = state.rk || { appId: '', accessKey: '' };
   $('rkAppId').value = state.rk.appId || ''; $('rkAccessKey').value = state.rk.accessKey || '';
   $('rkSave').addEventListener('click', () => {
