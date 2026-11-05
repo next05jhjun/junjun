@@ -114,7 +114,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 2.2</small><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 2.3</small><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">① 数える</button>
     <button data-tab="list">② 一覧</button>
@@ -208,26 +208,29 @@
       <h2>読み取りの動き</h2>
       <label class="check"><input type="checkbox" id="optAuto"> 連続モード：読んだら止めずに次へ進む（1.5秒後）</label>
       <p class="muted">オフ（おすすめ）だと、1つ読むたびに止まり「次を読む」を押すまで数えません。数えすぎを防げます。</p>
-      <label class="check"><input type="checkbox" id="optLookup"> ネットで商品情報（名前・画像）を調べる</label>
-      <p class="muted">バーコードの番号だけを商品データベース（Open Food Facts）に送って調べます。数量などは送りません。食品・飲料・日用品が中心で、見つからない商品もあります。</p>
+      <label class="check"><input type="checkbox" id="optLookup"> バーコードから品名を自動で調べる</label>
+      <p class="muted">バーコードの番号で<b>楽天市場</b>を検索し、品名と画像を表示します。見つからないときは、食品・日用品のデータベース（Open Food Facts）も調べます。送るのはバーコードの番号だけで、数量や金額は送りません。サロン専売品など、ネットで売られていない商品は見つからないことがあります。</p>
       <p class="muted">📷で品名を撮影したときの文字の読み取りは、スマホの中だけで行います。写真はどこにも送りません（初回だけ読み取り用の辞書を約3MBダウンロードします）。</p>
     </div>
     <div class="card">
-      <h2>楽天市場で商品名を調べる</h2>
-      <p class="muted">バーコードの番号や読み取った文字から、楽天市場の商品名を探します。<b>最初から使えるので、通常は何も入れなくて大丈夫です。</b>自分の楽天アプリIDを使いたい場合だけ入れてください（このスマホの中だけに保存されます）。</p>
+      <h2>楽天市場の接続</h2>
+      <p class="muted">楽天市場での品名検索は、設定しなくても最初から使えます。うまく品名が出ないときは「テスト」で接続を確認できます。</p>
+      <details class="rename"><summary>自分の楽天アプリIDを使う（通常は不要）</summary>
+      <p class="muted">楽天ウェブサービスで自分のアプリIDを発行した方だけ入れてください。空のままなら共通のIDを使います（このスマホの中だけに保存されます）。</p>
       <label for="rkAppId">アプリID（applicationId）</label>
       <input id="rkAppId" autocomplete="off" spellcheck="false">
       <label for="rkAccessKey">アクセスキー（accessKey）※発行された場合のみ</label>
       <input id="rkAccessKey" autocomplete="off" spellcheck="false">
       <div class="btns">
         <button id="rkSave" class="btn primary">保存</button>
-        <button id="rkTest" class="btn">テスト（見本のバーコードで検索）</button>
       </div>
+      </details>
+      <div class="btns"><button id="rkTest" class="btn">テスト（見本のバーコードで検索）</button></div>
       <pre id="rkResult" class="muted" style="white-space:pre-wrap;word-break:break-all;font-size:12px;margin:8px 0 0"></pre>
     </div>
     <div class="card">
       <h2>データの保存場所</h2>
-      <p class="muted">入力したデータは<b>このスマホ（ブラウザ）の中だけ</b>に保存され、インターネットには送信されません。（商品情報を調べる設定がオンのときは、バーコードの番号や読み取った品名の文字だけを送ります）。ブラウザの履歴やデータを消すと消えるので、終わったら必ずCSVに書き出してください。</p>
+      <p class="muted">入力したデータは<b>このスマホ（ブラウザ）の中だけ</b>に保存され、インターネットには送信されません。（品名を調べるときは、バーコードの番号や読み取った品名の文字だけを楽天市場などに送ります）。ブラウザの履歴やデータを消すと消えるので、終わったら必ずCSVに書き出してください。</p>
     </div>
   </section>
 </main>
@@ -429,14 +432,7 @@
   async function lookupNet(code) {
     if (!state.opt.lookup || !isJan(code) || !navigator.onLine) return null;
     let info = null, failed = false;
-    try {
-      const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_ja,brands,image_small_url,image_front_small_url`);
-      const j = await r.json();
-      const p = j && j.status === 1 && j.product;
-      if (p) info = { name: [p.brands, p.product_name_ja || p.product_name].filter(Boolean).join(' '), img: p.image_front_small_url || p.image_small_url || '', src: 'Open Food Facts' };
-      if (info && !info.name) info = null;
-    } catch (e) { failed = true; }
-    if (!info && rkReady()) {
+    if (rkReady()) { // 楽天市場を先に調べる
       const res = await rakutenSearch(code);
       if (res.error) failed = true;
       if (res.items.length) {
@@ -444,6 +440,13 @@
         info = { name: cands[0], img: res.items[0].img, url: res.items[0].url, cands, src: '楽天市場' };
       }
     }
+    if (!info) try { // 見つからなければ食品・日用品のデータベース
+      const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_ja,brands,image_small_url,image_front_small_url`);
+      const j = await r.json();
+      const p = j && j.status === 1 && j.product;
+      if (p) info = { name: [p.brands, p.product_name_ja || p.product_name].filter(Boolean).join(' '), img: p.image_front_small_url || p.image_small_url || '', src: 'Open Food Facts' };
+      if (info && !info.name) info = null;
+    } catch (e) { failed = true; }
     if (info || !failed) { state.lookup[code] = info; save(); } // 通信エラーのときは覚えずに次回また調べる
     return info;
   }
