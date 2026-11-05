@@ -81,6 +81,12 @@
   .links a { font-size: 14px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--accent); text-decoration: none; }
   .check { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 0; color: var(--text); font-size: 15px; }
   .check input { width: auto; margin-top: 4px; }
+  .namerow { display: flex; gap: 6px; margin-top: 8px; }
+  .namerow input { flex: 1; min-width: 0; }
+  .namerow button { flex: 0 0 auto; padding: 10px 12px; }
+  details.rename { margin-top: 8px; }
+  details.rename summary { color: var(--accent); font-size: 14px; cursor: pointer; }
+  .ocr-status { font-size: 14px; color: var(--muted); margin-top: 4px; min-height: 1em; }
 </style>
 </head>
 <body>
@@ -178,6 +184,7 @@
       <p class="muted">オフ（おすすめ）だと、1つ読むたびに止まり「次を読む」を押すまで数えません。数えすぎを防げます。</p>
       <label class="check"><input type="checkbox" id="optLookup"> ネットで商品情報（名前・画像）を調べる</label>
       <p class="muted">バーコードの番号だけを商品データベース（Open Food Facts）に送って調べます。数量などは送りません。食品・飲料・日用品が中心で、見つからない商品もあります。</p>
+      <p class="muted">📷で品名を撮影したときの文字の読み取りは、スマホの中だけで行います。写真はどこにも送りません（初回だけ読み取り用の辞書を約3MBダウンロードします）。</p>
     </div>
     <div class="card">
       <h2>データの保存場所</h2>
@@ -186,6 +193,7 @@
   </section>
 </main>
 <div class="toast" id="toast"></div>
+<input type="file" id="ocrFile" accept="image/*" capture="environment" hidden>
 <div class="flash" id="flash"></div>
 <div class="hit" id="hit">
   <div class="hit-box">
@@ -319,16 +327,87 @@
       html += `<div class="info">${info.img ? `<img src="${esc(info.img)}" alt="">` : ''}
         <div><div class="muted">ネットの商品情報</div><div class="nm">${esc(info.name)}</div>
         ${known ? '' : `<button class="btn" data-savename="${esc(code)}" data-name="${esc(info.name)}" style="margin-top:6px">この名前で登録</button>`}</div></div>`;
-    } else if (!known) {
-      html += `<p class="muted" style="margin:8px 0 0">${state.opt.lookup && isJan(code) ? 'ネットの商品情報は見つかりませんでした。' : ''}名前を付けておくと次から表示されます。</p>
-        <div class="row"><input placeholder="商品名を入力" data-nameinput="${esc(code)}"><button class="btn narrow" data-savename="${esc(code)}">登録</button></div>`;
+    }
+    if (!known) {
+      html += `<p class="muted" style="margin:8px 0 0">${!info && state.opt.lookup && isJan(code) ? 'ネットの商品情報は見つかりませんでした。' : ''}品名を入力するか、📷で品名を撮影すると文字を読み取ります。</p>
+        ${nameRow(code, '')}`;
+    } else {
+      html += `<details class="rename"><summary>名前を変える</summary>${nameRow(code, known)}</details>`;
     }
     el.innerHTML = html + links(code);
   }
+  function nameRow(code, value) {
+    return `<div class="namerow"><input placeholder="商品名" value="${esc(value)}" data-nameinput="${esc(code)}">
+      <button class="btn" data-ocr="${esc(code)}" aria-label="品名を撮影して読み取る">📷</button>
+      <button class="btn primary" data-savename="${esc(code)}">登録</button></div><div class="ocr-status"></div>`;
+  }
+
+  // ---------- 品名をカメラで読み取る（OCR） ----------
+  let ocrTarget = null, ocrWorker = null;
+  function loadScript(src) {
+    return new Promise((ok, ng) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = ng; document.head.appendChild(s); });
+  }
+  async function getWorker(status) {
+    if (ocrWorker) return ocrWorker;
+    status('文字読み取りの準備中…（初回だけ数十秒かかります）');
+    if (!window.Tesseract) await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js');
+    ocrWorker = await Tesseract.createWorker(['jpn', 'eng'], 1, {
+      logger: m => { if (m.status === 'loading language traineddata' && m.progress) status(`辞書を読み込み中… ${Math.round(m.progress * 100)}%`); }
+    });
+    return ocrWorker;
+  }
+  // 写真を小さく・白黒にして読み取りやすく、速くする
+  async function prepareImage(file) {
+    const img = await createImageBitmap(file);
+    const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+    const g = c.getContext('2d');
+    g.filter = 'grayscale(1) contrast(1.4)';
+    g.drawImage(img, 0, 0, c.width, c.height);
+    return c;
+  }
+  const tidy = (l) => l.replace(/(?<=[^\x00-\x7F])\s+(?=[^\x00-\x7F])/g, '').replace(/\s+/g, ' ').trim(); // 日本語の間の余分な空白を消す
+  const useful = (l) => l.replace(/[^\p{L}\p{N}]/gu, '').length >= 2; // ゴミのような行を除く
+  function pickName(data) {
+    // いちばん大きい文字の行を品名とみなす（短すぎるときは次に大きい行も足す）
+    const lines = (data.lines || [])
+      .map(l => ({ text: tidy(l.text || ''), h: l.bbox ? l.bbox.y1 - l.bbox.y0 : 0, conf: l.confidence || 0 }))
+      .filter(l => useful(l.text) && l.conf > 30)
+      .sort((a, b) => b.h - a.h);
+    if (!lines.length) return tidy((data.text || '').split('\n').filter(useful)[0] || '');
+    let name = lines[0].text;
+    if (name.length < 4 && lines[1]) name += ' ' + lines[1].text;
+    return name.slice(0, 60);
+  }
+  $('ocrFile').addEventListener('change', async e => {
+    const file = e.target.files[0]; e.target.value = '';
+    const t = ocrTarget; if (!file || !t) return;
+    const statusEl = t.row.nextElementSibling;
+    const status = (msg) => { if (statusEl) statusEl.textContent = msg; };
+    const btn = t.row.querySelector('[data-ocr]'); btn.disabled = true;
+    try {
+      const worker = await getWorker(status);
+      status('文字を読み取り中…');
+      const { data } = await worker.recognize(await prepareImage(file));
+      const text = pickName(data);
+      if (text) {
+        t.row.querySelector('[data-nameinput]').value = text;
+        status('読み取りました。間違いがあれば直してから「登録」を押してください。');
+      } else {
+        status('文字を読み取れませんでした。品名に近づいて、明るい場所で撮り直してください。');
+      }
+    } catch (err) {
+      status('読み取りに失敗しました。通信を確認してください。');
+    } finally { btn.disabled = false; }
+  });
+
   document.addEventListener('click', e => {
+    const oc = e.target.dataset && e.target.dataset.ocr;
+    if (oc !== undefined) { ocrTarget = { code: oc, row: e.target.closest('.namerow') }; $('ocrFile').click(); return; }
     const code = e.target.dataset && e.target.dataset.savename; if (code === undefined) return;
     let name = e.target.dataset.name;
-    if (name === undefined) { const inp = e.target.parentElement.querySelector('[data-nameinput]'); name = inp ? inp.value.trim() : ''; }
+    if (name === undefined) { const inp = e.target.closest('.namerow') && e.target.closest('.namerow').querySelector('[data-nameinput]'); name = inp ? inp.value.trim() : ''; }
     if (!name) { toast('商品名を入力してください'); return; }
     state.master[code] = Object.assign({ price: 0, book: null }, state.master[code], { name });
     save(); toast('登録しました：' + name);
