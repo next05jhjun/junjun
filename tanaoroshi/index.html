@@ -86,12 +86,21 @@
   .namerow button { flex: 0 0 auto; padding: 10px 12px; }
   details.rename { margin-top: 8px; }
   details.rename summary { color: var(--accent); font-size: 14px; cursor: pointer; }
+  .crop { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.7); display: none; align-items: center; justify-content: center; padding: 16px; }
+  .crop.show { display: flex; }
+  .crop-box { background: var(--card); border-radius: 12px; padding: 16px; width: 100%; max-width: 720px; }
+  .crop-wrap { position: relative; display: flex; justify-content: center; }
+  #cropCanvas { touch-action: none; max-width: 100%; border-radius: 6px; display: block; }
+  #cropRect { position: absolute; border: 3px solid #22b14c; background: rgba(34,177,76,.15); pointer-events: none; display: none; }
+  .crop-wrap { width: fit-content; margin: 0 auto; }
+  .crop .btns button { flex: 1; }
+  .crop button:disabled { opacity: .45; }
   .ocr-status { font-size: 14px; color: var(--muted); margin-top: 4px; min-height: 1em; }
 </style>
 </head>
 <body>
 <header>
-  <h1>かんたん棚卸 <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 1.3（11/05 品名読み取り）</small></h1>
+  <h1>かんたん棚卸 <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 1.4（11/05 品名を囲んで読み取り）</small></h1>
   <nav>
     <button data-tab="count" class="active">① 数える</button>
     <button data-tab="list">② 一覧</button>
@@ -194,6 +203,18 @@
 </main>
 <div class="toast" id="toast"></div>
 <input type="file" id="ocrFile" accept="image/*" capture="environment" hidden>
+<div class="crop" id="crop">
+  <div class="crop-box">
+    <p style="margin:0 0 8px;font-weight:bold">品名の部分を指でなぞって囲んでください</p>
+    <div class="crop-wrap"><canvas id="cropCanvas"></canvas><div id="cropRect"></div></div>
+    <p class="muted" style="margin:6px 0 0">品名だけをぴったり囲むと、よく読み取れます。</p>
+    <div class="btns">
+      <button class="btn" id="cropCancel">やめる</button>
+      <button class="btn" id="cropAll">全体を読む</button>
+      <button class="btn primary" id="cropOk" disabled>囲んだ所を読む</button>
+    </div>
+  </div>
+</div>
 <div class="flash" id="flash"></div>
 <div class="hit" id="hit">
   <div class="hit-box">
@@ -356,29 +377,94 @@
     });
     return ocrWorker;
   }
-  // 写真を小さく・白黒にして読み取りやすく、速くする
-  async function prepareImage(file) {
-    const img = await createImageBitmap(file);
-    const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+  // ---- 撮った写真から品名の部分を指で囲む ----
+  let cropImg = null, cropSel = null;
+  function openCrop(bitmap) {
+    cropImg = bitmap; cropSel = null;
+    const cv = $('cropCanvas');
+    const maxW = Math.min(window.innerWidth - 32, 688), maxH = window.innerHeight * 0.55;
+    const s = Math.min(maxW / bitmap.width, maxH / bitmap.height);
+    cv.width = Math.round(bitmap.width * s); cv.height = Math.round(bitmap.height * s);
+    cv.getContext('2d').drawImage(bitmap, 0, 0, cv.width, cv.height);
+    $('cropRect').style.display = 'none';
+    $('cropOk').disabled = true;
+    $('crop').classList.add('show');
+    return new Promise(res => { openCrop.done = res; });
+  }
+  (() => {
+    const cv = $('cropCanvas'), rect = $('cropRect');
+    let start = null;
+    const pos = (e) => { const r = cv.getBoundingClientRect(); return { x: Math.max(0, Math.min(r.width, e.clientX - r.left)), y: Math.max(0, Math.min(r.height, e.clientY - r.top)) }; };
+    const draw = () => {
+      if (!cropSel) { rect.style.display = 'none'; return; }
+      Object.assign(rect.style, { display: 'block', left: cropSel.x + 'px', top: cropSel.y + 'px', width: cropSel.w + 'px', height: cropSel.h + 'px' });
+    };
+    cv.addEventListener('pointerdown', e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); start = pos(e); cropSel = null; draw(); });
+    cv.addEventListener('pointermove', e => {
+      if (!start) return; const p = pos(e);
+      cropSel = { x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), w: Math.abs(p.x - start.x), h: Math.abs(p.y - start.y) };
+      draw();
+    });
+    const end = () => { start = null; if (cropSel && (cropSel.w < 12 || cropSel.h < 8)) cropSel = null; draw(); $('cropOk').disabled = !cropSel; };
+    cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+    const finish = (v) => { $('crop').classList.remove('show'); if (openCrop.done) openCrop.done(v); openCrop.done = null; };
+    $('cropCancel').addEventListener('click', () => finish(null));
+    $('cropAll').addEventListener('click', () => finish({ all: true }));
+    $('cropOk').addEventListener('click', () => {
+      const r = cv.getBoundingClientRect(), k = cropImg.width / r.width;
+      finish({ x: cropSel.x * k, y: cropSel.y * k, w: cropSel.w * k, h: cropSel.h * k });
+    });
+  })();
+
+  // 読み取りやすい画像にする：切り抜き → 文字が大きくなるよう拡大 → 白黒2値化
+  function prepareImage(bitmap, sel, target = 100) {
+    const sx = sel.all ? 0 : sel.x, sy = sel.all ? 0 : sel.y;
+    const sw = sel.all ? bitmap.width : sel.w, sh = sel.all ? bitmap.height : sel.h;
+    // 囲んだときは高さ target px（文字が読み取りやすい大きさ）に、全体のときは長辺1600pxまで縮小
+    let scale = sel.all ? Math.min(1, 1600 / Math.max(sw, sh)) : Math.min(4, Math.max(0.2, target / sh));
+    scale = Math.min(scale, 2400 / sw);
+    const pad = sel.all ? 0 : 20; // 周りに余白を付けると読みやすい
     const c = document.createElement('canvas');
-    c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
-    const g = c.getContext('2d');
-    g.filter = 'grayscale(1) contrast(1.4)';
-    g.drawImage(img, 0, 0, c.width, c.height);
+    c.width = Math.round(sw * scale) + pad * 2; c.height = Math.round(sh * scale) + pad * 2;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    g.drawImage(bitmap, sx, sy, sw, sh, pad, pad, c.width - pad * 2, c.height - pad * 2);
+    const W = c.width, H = c.height, inPad = (j) => { const x = j % W, y = (j / W) | 0; return x < pad || y < pad || x >= W - pad || y >= H - pad; };
+    const im = g.getImageData(0, 0, c.width, c.height), d = im.data;
+    const hist = new Array(256).fill(0), gray = new Uint8Array(d.length / 4);
+    let n = 0;
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) { const v = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) | 0; gray[j] = v; if (!pad || !inPad(j)) { hist[v]++; n++; } }
+    // 大津の方法で、文字と背景を分けるしきい値を決める
+    let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+    let sumB = 0, wB = 0, best = 0, th = 128;
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t]; if (!wB) continue; const wF = n - wB; if (!wF) break;
+      sumB += t * hist[t]; const mB = sumB / wB, mF = (sum - sumB) / wF, between = wB * wF * (mB - mF) ** 2;
+      if (between > best) { best = between; th = t; }
+    }
+    let dark = 0; for (let j = 0; j < gray.length; j++) if (gray[j] <= th && !(pad && inPad(j))) dark++;
+    const invert = !sel.all && dark > n / 2; // 濃い背景に白い文字なら反転
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+      let v = gray[j] > th ? 255 : 0; if (invert) v = 255 - v;
+      if (pad && inPad(j)) v = 255;
+      if (!sel.all) d[i] = d[i + 1] = d[i + 2] = v; // 囲んだときだけ2値化（全体はグレーのまま）
+      else d[i] = d[i + 1] = d[i + 2] = gray[j];
+    }
+    g.putImageData(im, 0, 0);
     return c;
   }
   const tidy = (l) => l.replace(/(?<=[^\x00-\x7F])\s+(?=[^\x00-\x7F])/g, '').replace(/\s+/g, ' ').trim(); // 日本語の間の余分な空白を消す
-  const useful = (l) => l.replace(/[^\p{L}\p{N}]/gu, '').length >= 2; // ゴミのような行を除く
-  function pickName(data) {
-    // いちばん大きい文字の行を品名とみなす（短すぎるときは次に大きい行も足す）
+  // 文字・数字が半分以上で、2文字以上ある行だけ残す（記号だらけのゴミを除く）
+  const useful = (l) => { const k = l.replace(/[^\p{L}\p{N}]/gu, '').length; return k >= 2 && k >= l.replace(/\s/g, '').length * 0.6; };
+  function candidates(data, all) {
     const lines = (data.lines || [])
       .map(l => ({ text: tidy(l.text || ''), h: l.bbox ? l.bbox.y1 - l.bbox.y0 : 0, conf: l.confidence || 0 }))
-      .filter(l => useful(l.text) && l.conf > 30)
-      .sort((a, b) => b.h - a.h);
-    if (!lines.length) return tidy((data.text || '').split('\n').filter(useful)[0] || '');
-    let name = lines[0].text;
-    if (name.length < 4 && lines[1]) name += ' ' + lines[1].text;
-    return name.slice(0, 60);
+      .filter(l => useful(l.text) && l.conf >= (all ? 55 : 35));
+    if (!all) { // 囲んだ範囲はつなげたものを第一候補に
+      const joined = lines.map(l => l.text).join(' ').slice(0, 60);
+      return [...new Set([joined, ...lines.map(l => l.text)])].filter(Boolean).slice(0, 5);
+    }
+    return [...new Set(lines.sort((a, b) => b.h * b.conf - a.h * a.conf).map(l => l.text.slice(0, 60)))].slice(0, 5);
   }
   $('ocrFile').addEventListener('change', async e => {
     const file = e.target.files[0]; e.target.value = '';
@@ -387,19 +473,43 @@
     const status = (msg) => { if (statusEl) statusEl.textContent = msg; };
     const btn = t.row.querySelector('[data-ocr]'); btn.disabled = true;
     try {
-      const worker = await getWorker(status);
+      const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+      const workerP = getWorker(status); // 囲んでいる間に準備を進める
+      workerP.catch(() => {});
+      const sel = await openCrop(bitmap);
+      if (!sel) { status(''); return; }
+      const worker = await workerP;
       status('文字を読み取り中…');
-      const { data } = await worker.recognize(await prepareImage(file));
-      const text = pickName(data);
-      if (text) {
-        t.row.querySelector('[data-nameinput]').value = text;
-        status('読み取りました。間違いがあれば直してから「登録」を押してください。');
+      let data;
+      if (sel.all) {
+        await worker.setParameters({ tessedit_pageseg_mode: '3' });
+        data = (await worker.recognize(prepareImage(bitmap, sel))).data;
       } else {
-        status('文字を読み取れませんでした。品名に近づいて、明るい場所で撮り直してください。');
+        // 囲んだ範囲は大きさを変えて何回か読み、いちばん自信のある結果を使う
+        await worker.setParameters({ tessedit_pageseg_mode: '6' });
+        for (const target of [100, 140, 70]) {
+          const d = (await worker.recognize(prepareImage(bitmap, sel, target))).data;
+          if (!data || (d.confidence || 0) > (data.confidence || 0)) data = d;
+          if (data.confidence >= 80) break;
+        }
+      }
+      const list = candidates(data, sel.all);
+      if (list.length) {
+        t.row.querySelector('[data-nameinput]').value = list[0];
+        statusEl.innerHTML = '読み取りました。違うときは下の候補をタップするか、手で直してください。' +
+          (list.length > 1 ? '<div class="links">' + list.map(x => `<a href="#" data-pick="${esc(x)}">${esc(x)}</a>`).join('') + '</div>' : '');
+      } else {
+        status('文字を読み取れませんでした。品名だけを小さめに囲んで、もう一度試してください。');
       }
     } catch (err) {
-      status('読み取りに失敗しました。通信を確認してください。');
+      console.error(err); status('読み取りに失敗しました。通信を確認してください。');
     } finally { btn.disabled = false; }
+  });
+  document.addEventListener('click', e => {
+    const v = e.target.dataset && e.target.dataset.pick; if (v === undefined) return;
+    e.preventDefault();
+    const row = e.target.closest('.ocr-status').previousElementSibling;
+    row.querySelector('[data-nameinput]').value = v;
   });
 
   document.addEventListener('click', e => {
