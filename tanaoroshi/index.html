@@ -100,7 +100,7 @@
 </head>
 <body>
 <header>
-  <h1>かんたん棚卸 <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 1.5（11/05 楽天で品名検索）</small></h1>
+  <h1>かんたん棚卸 <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 1.6（11/05 楽天の新しい版に対応）</small></h1>
   <nav>
     <button data-tab="count" class="active">① 数える</button>
     <button data-tab="list">② 一覧</button>
@@ -326,7 +326,9 @@
   // ---------- 商品情報 ----------
   const isJan = (code) => /^\d{8}$|^\d{12,14}$/.test(code);
   // ---- 楽天市場の商品検索 ----
-  const RK_ENDPOINTS = [ // 2026年の新しい仕組み → 従来の仕組み の順に試す
+  const RK_ENDPOINTS = [ // 2026年の新しい版 → 古い版 の順に試す
+    'https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701',
+    'https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401',
     'https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20220601',
     'https://app.rakuten.co.jp/services/api/IchibaItem/Search/20220601',
   ];
