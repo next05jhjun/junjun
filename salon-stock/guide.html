@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>サロンストックの使い方</title>
+<meta name="theme-color" content="#7a4bd6">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #677085; --line: #dde1e8; --accent: #7a4bd6; --accent-text: #fff; --hl: #f1ebff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #12151b; --card: #1b2029; --text: #e7eaf0; --muted: #9aa3b5; --line: #2e3542; --accent: #a98bff; --accent-text: #0b0e13; --hl: #2a2340; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; line-height: 1.7; }
+  header { background: var(--accent); color: var(--accent-text); padding: 28px 16px 24px; text-align: center; }
+  header img { width: 64px; height: 64px; border-radius: 14px; }
+  header h1 { margin: 8px 0 4px; font-size: 24px; }
+  header p { margin: 0; opacity: .9; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; }
+  h2 { font-size: 18px; margin: 0 0 8px; }
+  h2 .no { display: inline-flex; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--accent-text); align-items: center; justify-content: center; font-size: 15px; margin-right: 6px; }
+  ol, ul { padding-left: 1.3em; margin: 6px 0; }
+  li { margin: 4px 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .tip { background: var(--hl); border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-top: 8px; }
+  .open { display: block; text-align: center; background: var(--accent); color: var(--accent-text); text-decoration: none; font-weight: bold; padding: 14px; border-radius: 10px; font-size: 18px; margin: 4px 0 16px; }
+  .feat { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+  .feat div { background: var(--bg); border-radius: 8px; padding: 10px; font-size: 14px; }
+  .feat b { display: block; font-size: 15px; }
+</style>
+</head>
+<body>
+<header>
+  <img src="icon-192.png" alt="">
+  <h1>サロンストック</h1>
+  <p>美容室・理容室のための、バーコードで数える棚卸アプリ</p>
+</header>
+<main>
+  <a class="open" href="./">アプリを開く</a>
+
+  <div class="card">
+    <h2>できること</h2>
+    <div class="feat">
+      <div><b>📷 読むだけで数える</b>スマホのカメラでバーコードを読むと1つずつ数えます</div>
+      <div><b>🔍 品名を自動表示</b>楽天市場などから商品名を探して表示します</div>
+      <div><b>🎨 種類で分ける</b>カラー剤・パーマ剤・店販品などに分けて管理</div>
+      <div><b>📊 Excelに書き出し</b>結果をCSVで保存。帳簿との差や在庫金額も計算</div>
+    </div>
+    <p class="muted">無料・登録不要です。データはお使いのスマホの中だけに保存され、外部に送られません。</p>
+  </div>
+
+  <div class="card">
+    <h2><span class="no">1</span>ホーム画面に追加する（おすすめ）</h2>
+    <p>アプリのようにすぐ開けるようになります。</p>
+    <ul>
+      <li><b>iPhone（Safari）</b>：下の共有ボタン（□に↑）→「ホーム画面に追加」</li>
+      <li><b>Android（Chrome）</b>：右上の︙ →「ホーム画面に追加」または「アプリをインストール」</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2><span class="no">2</span>数える</h2>
+    <ol>
+      <li>「① 数える」で担当者と場所（例：薬剤棚）を入れます</li>
+      <li>「📷 カメラを起動」を押し、カメラの使用を許可します</li>
+      <li>バーコードを枠に合わせると、画面が緑に光って1つ数えます</li>
+      <li>同じ商品が複数あるときは「+1」、終わったら「次を読む」</li>
+    </ol>
+    <div class="tip">箱単位で数えるときは、数量の欄を「12」などにしてから読むと、まとめて足せます。</div>
+  </div>
+
+  <div class="card">
+    <h2><span class="no">3</span>品名と種類を登録する</h2>
+    <p>初めての商品は、品名が自動で表示されるか確認して「この名前で登録」を押します。種類（カラー剤・パーマ剤など）もタップで選べます。一度登録すれば、次からは読むだけで表示されます。</p>
+    <ul>
+      <li><b>品名が出ないとき</b>：📷を押してパッケージを撮影 → 品名の部分を指で囲む → 読み取った文字を確認</li>
+      <li><b>文字が少し違うとき</b>：「🔍 楽天を検索して品名を予測」を押すと、正しい品名の候補が出ます</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2><span class="no">4</span>結果を確認・保存する</h2>
+    <ul>
+      <li><b>② 一覧</b>：数を直したり消したりできます。種類で絞り込みもできます</li>
+      <li><b>Excel用に書き出す</b>：結果をCSVで保存。終わったら必ず保存してください</li>
+      <li><b>③ 集計</b>：在庫金額を種類ごとに表示。スタッフが別々に数えたCSVもまとめられます</li>
+    </ul>
+    <div class="tip">「設定」で商品リスト（バーコード, 商品名, 単価, 帳簿数, 種類）をCSVで読み込むと、帳簿との差や差額も自動で計算します。</div>
+  </div>
+
+  <div class="card">
+    <h2>よくある質問</h2>
+    <p><b>Q. 料金はかかりますか？</b><br>無料です。</p>
+    <p><b>Q. データはどこに保存されますか？</b><br>お使いのスマホのブラウザの中だけです。ブラウザの履歴・データを消すと消えるので、CSVに書き出して保存してください。別のスマホとは自動で共有されません。</p>
+    <p><b>Q. 何が外部に送られますか？</b><br>品名を調べるときの「バーコードの番号」と「読み取った品名の文字」だけです。数量・金額・写真は送りません。</p>
+    <p><b>Q. カメラが起動しません</b><br>ブラウザの設定でカメラを許可してください。iPhoneは「設定」→「Safari」→「カメラ」→「許可」。</p>
+  </div>
+
+  <a class="open" href="./">アプリを開く</a>
+  <p class="muted" style="text-align:center">商品情報の一部は <a href="https://webservice.rakuten.co.jp/" target="_blank" rel="noopener">Supported by Rakuten Developers</a></p>
+</main>
+</body>
+</html>
