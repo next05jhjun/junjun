@@ -50,7 +50,15 @@
   label { display: block; font-size: 14px; color: var(--muted); margin: 8px 0 4px; }
   input, select { width: 100%; padding: 10px; font-size: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
   .row { display: flex; gap: 8px; align-items: flex-end; }
-  .row > * { flex: 1; }
+  .row > * { flex: 1; min-width: 0; }
+  input[type="date"] { -webkit-appearance: none; appearance: none; min-width: 0; min-height: 44px; }
+  input[type="date"]::-webkit-date-and-time-value { text-align: left; }
+  .sup-need { border: 2px solid var(--bad); background: color-mix(in srgb, var(--bad) 8%, var(--bg)); }
+  .sup-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .sup-chips button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 14px; }
+  .sup-chips button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .warn-line { color: var(--bad); font-weight: bold; }
+  .edit-bar { scroll-margin-top: 140px; background: var(--hl); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
   .row > .narrow { flex: 0 0 96px; }
   button.btn { padding: 12px 14px; font-size: 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; }
   button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: bold; }
@@ -129,7 +137,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.2</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.3</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -174,14 +182,17 @@
   <!-- 入庫 -->
   <section id="tab-recv">
     <div class="card">
+      <div id="rEditBar" class="edit-bar" style="display:none"></div>
       <h2>納品書の情報</h2>
+      <label for="rSupplier"><b>仕入先（必ず入れてください）</b></label>
+      <input id="rSupplier" list="supList" placeholder="例：〇〇商事" autocomplete="off">
+      <div id="supChips" class="sup-chips"></div>
+      <p class="muted" style="margin:4px 0 0">前に使った仕入先は、押すだけで入ります。集計やExcelの「仕入先」に使われます。</p>
+      <datalist id="supList"></datalist>
       <div class="row">
         <div><label for="rDate">納品日</label><input id="rDate" type="date"></div>
-        <div><label for="rSupplier">仕入先</label><input id="rSupplier" list="supList" placeholder="例：〇〇商事"></div>
+        <div><label for="rSlip">伝票番号（任意）</label><input id="rSlip" autocomplete="off"></div>
       </div>
-      <datalist id="supList"></datalist>
-      <label for="rSlip">伝票番号（任意）</label>
-      <input id="rSlip" autocomplete="off">
       <div class="btns"><button id="rPhotoBtn" class="btn">📷 納品書を撮影（確認用・任意）</button></div>
       <input type="file" id="rPhotoFile" accept="image/*" capture="environment" hidden>
       <div id="rPhotoPrev"></div>
@@ -199,6 +210,7 @@
       <p class="muted">単価は一度入れると覚えます。次からは自動で入ります。</p>
       <div class="table-wrap"><table id="rTable"></table></div>
       <p id="rTotal" style="font-weight:bold"></p>
+      <p id="rSupWarn" class="warn-line" style="display:none">⚠️ 仕入先がまだ入っていません（いちばん上の欄）</p>
       <div class="btns">
         <button id="rSave" class="btn primary">この納品書を保存</button>
         <button id="rClear" class="btn danger">やり直す</button>
@@ -1359,7 +1371,16 @@
     if ($('rDate').value !== d.date) $('rDate').value = d.date;
     if (document.activeElement !== $('rSupplier')) $('rSupplier').value = d.supplier || '';
     if (document.activeElement !== $('rSlip')) $('rSlip').value = d.slip || '';
-    $('supList').innerHTML = uniq(state.receipts.map(r => r.supplier).filter(Boolean)).map(x => `<option value="${esc(x)}">`).join('');
+    const sups = uniq(state.receipts.slice().reverse().map(r => r.supplier).filter(Boolean));
+    $('supList').innerHTML = sups.map(x => `<option value="${esc(x)}">`).join('');
+    $('supChips').innerHTML = sups.slice(0, 8).map(x => `<button type="button" data-sup="${esc(x)}" class="${x === (d.supplier || '').trim() ? 'on' : ''}">${esc(x)}</button>`).join('');
+    markSupplier();
+    const ed = d.editId && state.receipts.find(r => r.id === d.editId);
+    if (d.editId && !ed) d.editId = '';
+    $('rEditBar').style.display = ed ? '' : 'none';
+    if (ed) $('rEditBar').innerHTML = `✏️ <b>${esc(md(ed.date))} ${esc(ed.supplier || '（仕入先なし）')}</b> の入庫を直しています。<div class="btns"><button class="btn" id="rEditCancel">直すのをやめる</button></div>`;
+    $('rSave').textContent = ed ? '直した内容で保存' : 'この納品書を保存';
+    $('rClear').style.display = ed ? 'none' : '';
     if (!d.lines.length) {
       $('rTable').innerHTML = '<tr><td class="muted">まだ商品がありません。届いた商品のバーコードを読んでください。</td></tr>';
       $('rTotal').textContent = '';
@@ -1379,7 +1400,24 @@
     renderBilling();
   }
   $('rDate').addEventListener('change', e => { state.draft.date = e.target.value; save(); });
-  $('rSupplier').addEventListener('input', e => { state.draft.supplier = e.target.value; save(); });
+  function markSupplier() {
+    const empty = !(state.draft.supplier || '').trim();
+    $('rSupplier').classList.toggle('sup-need', empty);
+    $('rSupWarn').style.display = empty && state.draft.lines.length ? '' : 'none';
+  }
+  $('rSupplier').addEventListener('input', e => { state.draft.supplier = e.target.value; save(); markSupplier();
+    for (const b of $('supChips').children) b.classList.toggle('on', b.dataset.sup === e.target.value.trim()); });
+  $('supChips').addEventListener('click', e => {
+    const v = e.target.dataset && e.target.dataset.sup; if (v === undefined) return;
+    state.draft.supplier = v; $('rSupplier').value = v; save(); renderRecv();
+  });
+  $('rEditBar').addEventListener('click', e => {
+    if (e.target.id !== 'rEditCancel') return;
+    const d = state.draft;
+    if (d.photo && d.photo !== d.origPhoto) idb.del(d.photo).catch(() => {});
+    state.draft = { date: today(), supplier: '', slip: '', lines: [], photo: '' }; save();
+    showDraftPhoto(); renderRecv(); toast('直すのをやめました（元のままです）');
+  });
   $('rSlip').addEventListener('input', e => { state.draft.slip = e.target.value; save(); });
   // 数量・単価の変更（一覧と、読み取り画面の単価欄の両方）
   document.addEventListener('change', e => {
@@ -1398,7 +1436,7 @@
   $('rClear').addEventListener('click', async () => {
     if (!state.draft.lines.length && !state.draft.photo) return;
     if (!confirm('入力中の納品書を消して、やり直しますか？')) return;
-    if (state.draft.photo) idb.del(state.draft.photo).catch(() => {});
+    if (state.draft.photo && state.draft.photo !== state.draft.origPhoto) idb.del(state.draft.photo).catch(() => {});
     state.draft = { date: today(), supplier: '', slip: '', lines: [], photo: '' }; save();
     $('rPhotoPrev').innerHTML = ''; renderRecv();
   });
@@ -1411,7 +1449,7 @@
       const url = await shrinkPhoto(f);
       const key = 'slip-' + Date.now();
       await idb.put(key, url);
-      if (state.draft.photo) idb.del(state.draft.photo).catch(() => {});
+      if (state.draft.photo && state.draft.photo !== state.draft.origPhoto) idb.del(state.draft.photo).catch(() => {});
       state.draft.photo = key; save();
       showDraftPhoto();
       toast('納品書の写真を保存しました');
@@ -1425,10 +1463,20 @@
   $('rSave').addEventListener('click', () => {
     const d = state.draft;
     if (!d.lines.length) { toast('商品がありません'); return; }
+    if (!(d.supplier || '').trim()) {
+      toast('仕入先を入れてください'); markSupplier();
+      $('rSupplier').scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => $('rSupplier').focus(), 300); return;
+    }
+    const old = d.editId && state.receipts.find(x => x.id === d.editId);
     const noPrice = canMoney() ? d.lines.filter(l => l.price === '' || l.price == null).length : 0;
     if (noPrice && !confirm(`単価が入っていない商品が ${noPrice} 品目あります。このまま保存しますか？（材料費の計算では0円になります）`)) return;
     const r = { id: Date.now().toString(36), date: d.date || today(), supplier: (d.supplier || '').trim(), slip: (d.slip || '').trim(),
-      lines: d.lines.map(l => ({ code: l.code, qty: Number(l.qty) || 0, price: l.price === '' ? '' : Number(l.price) })), photo: d.photo || '', created: Date.now() };
+      lines: d.lines.map(l => ({ code: l.code, qty: Number(l.qty) || 0, price: l.price === '' ? '' : Number(l.price) })), photo: d.photo || '', created: old ? old.created : Date.now() };
+    if (old) { // 直す：元の入庫を消して、直した内容を新しく保存する（期間の判定は元の記録時刻のまま）
+      state.receipts = state.receipts.filter(x => x.id !== old.id);
+      if (old.photo && old.photo !== r.photo) idb.del(old.photo).catch(() => {});
+      cloudHook('recvDel', old.id);
+    }
     // 単価を覚える（在庫金額・材料費の計算に使う）
     for (const l of r.lines) if (l.price !== '' && l.price > 0) {
       const m = state.master[l.code] || (state.master[l.code] = { name: '', price: 0, book: null });
@@ -1440,19 +1488,20 @@
     state.draft = { date: today(), supplier: '', slip: '', lines: [], photo: '' };
     save(); $('rPhotoPrev').innerHTML = '';
     renderRecv();
-    toast(`保存しました（${r.lines.length} 品目 ${yen(slipAmount(r))}）`);
+    toast(`${old ? '直しました' : '保存しました'}（${r.lines.length} 品目${canMoney() ? ' ' + yen(slipAmount(r)) : ''}）`);
   });
 
   function renderRecvHistory() {
-    const list = state.receipts.slice().reverse().slice(0, 50);
+    const list = state.receipts.slice().sort((a, b) => (b.created || 0) - (a.created || 0)).slice(0, 50);
     if (!list.length) { $('rHistory').innerHTML = '<p class="muted">まだありません。</p>'; return; }
     const lc = lastClose();
     $('rHistory').innerHTML = list.map(r => `
-      <details class="rename" data-rid="${esc(r.id)}"><summary>${esc(md(r.date))}　${esc(r.supplier || '（仕入先なし）')}　${r.lines.length}品目${canMoney() ? '　' + yen(slipAmount(r)) : ''}${lc && r.created <= lc.at ? '　<span class="muted">確定済み</span>' : ''}</summary>
+      <details class="rename" data-rid="${esc(r.id)}"><summary>${esc(md(r.date))}　${r.supplier ? esc(r.supplier) : '<span class="warn-line">（仕入先なし）</span>'}　${r.lines.length}品目${canMoney() ? '　' + yen(slipAmount(r)) : ''}${lc && r.created <= lc.at ? '　<span class="muted">確定済み</span>' : ''}</summary>
         <div class="table-wrap"><table>${r.lines.map(l => `<tr><td>${esc(nameOf(l.code))}</td><td class="num">${l.qty}</td>${canMoney() ? `<td class="num">${l.price === '' ? '-' : yen(l.price)}</td><td class="num">${yen(lineAmount(l))}</td>` : ''}</tr>`).join('')}</table></div>
         ${r.slip ? `<p class="muted">伝票番号：${esc(r.slip)}</p>` : ''}
         <div class="rphoto"></div>
-        <div class="btns"><button class="btn danger" data-rcdel="${esc(r.id)}">この入庫を削除</button></div>
+        ${canEditRecv(r) ? `<div class="btns"><button class="btn" data-rcedit="${esc(r.id)}">✏️ 直す</button><button class="btn danger" data-rcdel="${esc(r.id)}">この入庫を削除</button></div>`
+          : '<p class="muted">ほかの人の記録です（直す・削除はオーナーか「全部」の権限の人ができます）</p>'}
       </details>`).join('');
   }
   $('rHistory').addEventListener('toggle', async e => {
@@ -1460,12 +1509,28 @@
     const r = state.receipts.find(x => x.id === det.dataset.rid);
     if (r && r.photo) { const url = await idb.get(r.photo).catch(() => ''); if (url) det.querySelector('.rphoto').innerHTML = `<img alt="納品書" style="max-width:100%;border-radius:8px" src="${esc(url)}">`; }
   }, true);
+  function canEditRecv(r) { return !Cloud.on || canMoney() || !r.by || r.by === Cloud.uid(); }
+  $('rHistory').addEventListener('click', e => {
+    const eid = e.target.dataset.rcedit; if (eid === undefined) return;
+    const r = state.receipts.find(x => x.id === eid); if (!r) return;
+    const d = state.draft;
+    if ((d.lines.length || d.photo) && !d.editId && !confirm('入力中の納品書があります。消して、この入庫を直しますか？')) return;
+    if (d.photo && d.photo !== d.origPhoto) idb.del(d.photo).catch(() => {});
+    if (lastClose() && r.created <= lastClose().at && !confirm('この入庫は棚卸の確定より前のものです。直すと、確定したときの数字とずれることがあります。直しますか？')) return;
+    state.draft = { date: r.date, supplier: r.supplier || '', slip: r.slip || '', photo: r.photo || '', origPhoto: r.photo || '', editId: r.id,
+      lines: r.lines.map(l => ({ code: l.code, qty: l.qty, price: l.price })) };
+    save(); showDraftPhoto(); renderRecv();
+    $('rEditBar').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    toast('上の欄で直して「直した内容で保存」を押してください');
+  });
   $('rHistory').addEventListener('click', e => {
     const id = e.target.dataset.rcdel; if (id === undefined) return;
     const r = state.receipts.find(x => x.id === id); if (!r) return;
     if (!confirm(`${md(r.date)} ${r.supplier || ''} の入庫（${yen(slipAmount(r))}）を削除しますか？`)) return;
     if (r.photo) idb.del(r.photo).catch(() => {});
-    state.receipts = state.receipts.filter(x => x.id !== id); save(); cloudHook('recvDel', id); renderRecv();
+    state.receipts = state.receipts.filter(x => x.id !== id);
+    if (state.draft.editId === id) state.draft = { date: today(), supplier: '', slip: '', lines: [], photo: '' };
+    save(); cloudHook('recvDel', id); renderRecv();
   });
   $('rExport').addEventListener('click', () => {
     const rows = [['納品日', '仕入先', '伝票番号', 'バーコード', '商品名', '種類', '数量', '単価', '金額']];
@@ -2130,7 +2195,7 @@
       state.receipts = evs.filter(e => e.kind === 'recv').map(e => {
         const p = (cc.recvPrices[e.id] || {}).p || {};
         // 単価が入っていない入庫（記録だけのスタッフが入れたもの）は、登録済みの仕入単価で計算する
-        return { id: e.id, date: e.date, supplier: e.supplier || '', slip: e.slip || '', lines: (e.lines || []).map(l => ({ code: l.c, qty: l.q, price: p[l.c] ?? ((cc.costs[l.c] || {}).price || '') })), photo: photoOf[e.id] || '', created: e.ts };
+        return { id: e.id, date: e.date, supplier: e.supplier || '', slip: e.slip || '', lines: (e.lines || []).map(l => ({ code: l.c, qty: l.q, price: p[l.c] ?? ((cc.costs[l.c] || {}).price || '') })), photo: photoOf[e.id] || '', created: e.ts, by: e.by || '' };
       });
       state.outs = evs.filter(e => e.kind === 'out').map(e => ({ id: e.id, date: e.date, type: e.type, customer: e.customer || '', lines: (e.lines || []).map(l => ({ code: l.c, qty: l.q, sell: l.s ?? '' })), created: e.ts }));
       const st = cc.settings.main || {};
@@ -2400,7 +2465,7 @@
     }
 
     return {
-      on: false, money, derive, pull,
+      on: false, money, derive, pull, uid: () => user && user.uid,
       hook(kind, ...a) { hooks[kind](...a); },
       async init() {
         try { user = JSON.parse(localStorage.getItem(USER_KEY)); } catch (e) { user = null; }
