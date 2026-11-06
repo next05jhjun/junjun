@@ -40,7 +40,7 @@
   .catsum { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; font-size: 13px; }
   .catsum span { background: var(--bg); border-radius: 6px; padding: 4px 8px; }
   nav { display: flex; gap: 4px; margin-top: 8px; }
-  nav button { flex: 1; padding: 10px 4px; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 8px; font-size: 14px; }
+  nav button { flex: 1; padding: 10px 4px; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 8px; font-size: 13px; }
   nav button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: bold; }
   main { max-width: 720px; margin: 0 auto; padding: 16px; }
   section { display: none; }
@@ -120,10 +120,11 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 3.4</small><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 3.5</small><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
+    <button data-tab="out">出庫</button>
     <button data-tab="list">一覧</button>
     <button data-tab="total">集計</button>
     <button data-tab="setting">設定</button>
@@ -203,6 +204,43 @@
       <h2>これまでの入庫</h2>
       <div id="rHistory"></div>
       <div class="btns"><button id="rExport" class="btn">入庫一覧を書き出す（CSV）</button></div>
+    </div>
+  </section>
+
+  <!-- 出庫 -->
+  <section id="tab-out">
+    <div class="card">
+      <h2>出庫の種類</h2>
+      <div class="cats" id="oType">
+        <button type="button" data-otype="sale">🛍 店販（お客様に販売）</button>
+        <button type="button" data-otype="use">✂️ 材料として使用</button>
+      </div>
+      <div class="row">
+        <div><label for="oDate">日付</label><input id="oDate" type="date"></div>
+        <div id="oCustWrap"><label for="oCust">お客様名（任意）</label><input id="oCust" list="custList" placeholder="例：山田様"></div>
+      </div>
+      <datalist id="custList"></datalist>
+    </div>
+    <div class="card">
+      <h2>出庫する商品を読む</h2>
+      <button id="camBtn3" class="btn primary full">📷 カメラを起動</button>
+      <div id="reader3" style="width:100%;border-radius:8px;overflow:hidden;margin-top:8px"></div>
+      <label for="oCode">バーコード（手入力・ハンディスキャナーもここ）</label>
+      <div class="row">
+        <input id="oCode" inputmode="numeric" autocomplete="off" placeholder="4901234567890">
+        <input id="oQty" class="narrow" type="number" value="1" aria-label="数量">
+      </div>
+      <button id="oAddBtn" class="btn primary full" style="margin-top:8px">追加（Enterでも可）</button>
+      <div class="table-wrap" style="margin-top:8px"><table id="oTable"></table></div>
+      <p id="oTotal" style="font-weight:bold"></p>
+      <div class="btns">
+        <button id="oSave" class="btn primary">記録する</button>
+        <button id="oClear" class="btn danger">やり直す</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>これまでの出庫</h2>
+      <div id="oHistory"></div>
     </div>
   </section>
 
@@ -359,7 +397,7 @@
   // ---------- 保存データ ----------
   // counts: { code: { qty, places: {place: qty}, updated } }
   let state = { staff: '', place: '', counts: {}, master: {}, history: [], lookup: {}, opt: { auto: false, lookup: true, share: true }, rk: { appId: '', accessKey: '' },
-    receipts: [], suppliers: {}, draft: { date: '', supplier: '', slip: '', lines: [], photo: '' }, closes: [], sales: '' };
+    receipts: [], suppliers: {}, outs: [], oDraft: { date: '', type: 'sale', customer: '', lines: [] }, draft: { date: '', supplier: '', slip: '', lines: [], photo: '' }, closes: [], sales: '' };
   let merged = []; // [{file, rows:[{code,name,qty,staff,place}]}]
 
   function load() {
@@ -874,18 +912,20 @@
 
   // ---------- 読み取り結果の画面 ----------
   let hitCode = null, autoTimer = null, scanMode = 'count';
-  const hitQty = (code) => scanMode === 'recv'
-    ? ((state.draft.lines.find(l => l.code === code) || {}).qty || 0)
+  const hitQty = (code) => scanMode === 'recv' ? ((state.draft.lines.find(l => l.code === code) || {}).qty || 0)
+    : scanMode === 'out' ? ((state.oDraft.lines.find(l => l.code === code) || {}).qty || 0)
     : (state.counts[code] ? state.counts[code].qty : 0);
   function showHit(code) {
     hitCode = code;
     $('hitCount').textContent = hitQty(code);
-    document.querySelector('.hit-ok').textContent = scanMode === 'recv' ? '✓ 入庫に追加しました' : '✓ 読み取りました';
+    document.querySelector('.hit-ok').textContent = scanMode === 'recv' ? '✓ 入庫に追加しました' : scanMode === 'out' ? (state.oDraft.type === 'use' ? '✓ 材料の使用に追加しました' : '✓ 店販の販売に追加しました') : '✓ 読み取りました';
+    const oline = scanMode === 'out' && state.oDraft.type === 'sale' && state.oDraft.lines.find(l => l.code === code);
     const line = scanMode === 'recv' && state.draft.lines.find(l => l.code === code);
     $('hitInfo').innerHTML = `<div id="hitName" style="text-align:center;font-weight:bold;font-size:18px">${esc(nameOf(code))}</div>
       <div class="muted" style="text-align:center">${esc(code)}</div>
       ${line ? `<div class="row"><div><label>仕入単価（円）</label><input type="number" inputmode="numeric" data-rprice="${esc(code)}" value="${esc(line.price)}" placeholder="納品書の単価"></div>
         <div><label>販売単価（円・任意）</label><input type="number" inputmode="numeric" data-sell="${esc(code)}" value="${esc((state.master[code] || {}).sell ?? '')}" placeholder="店販の売価"></div></div>` : ''}
+      ${oline ? `<label>販売単価（円・税抜）</label><input type="number" inputmode="numeric" data-osell="${esc(code)}" value="${esc(oline.sell)}" placeholder="売価">` : ''}
       <div id="hitMore"></div>`;
     renderInfo($('hitMore'), code);
     if (!$('hit').classList.contains('show')) $('hitScroll').scrollTop = 0;
@@ -900,7 +940,7 @@
     if (scanner) { try { scanner.resume(); } catch (e) {} }
   }
   $('hitNext').addEventListener('click', closeHit);
-  const bump = (d) => { clearTimeout(autoTimer); if (scanMode === 'recv') addRecv(hitCode, d); else addCount(hitCode, d); $('hitCount').textContent = hitQty(hitCode); };
+  const bump = (d) => { clearTimeout(autoTimer); if (scanMode === 'recv') addRecv(hitCode, d); else if (scanMode === 'out') addOut(hitCode, d); else addCount(hitCode, d); $('hitCount').textContent = hitQty(hitCode); };
   $('hitPlus').addEventListener('click', () => bump(1));
   $('hitMinus').addEventListener('click', () => bump(-1));
 
@@ -937,7 +977,7 @@
     if (!window.Html5Qrcode) { toast('読み取り機能を読み込めませんでした。通信を確認してください'); return; }
     scanMode = mode; lastScan = { code: '', at: 0 };
     const F = Html5QrcodeSupportedFormats;
-    scanner = new Html5Qrcode(mode === 'recv' ? 'reader2' : 'reader', { formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.ITF, F.QR_CODE], verbose: false });
+    scanner = new Html5Qrcode({ recv: 'reader2', out: 'reader3' }[mode] || 'reader', { formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.ITF, F.QR_CODE], verbose: false });
     try {
       await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 260, height: 140 } }, (text) => {
         if (hitCode !== null) return;
@@ -946,11 +986,11 @@
         if (text === lastScan.code && now - lastScan.at < 2000) return;
         lastScan = { code: text, at: now };
         try { scanner.pause(true); } catch (e) {}
-        if (scanMode === 'recv') addRecv(text, $('rQty').value); else addCount(text, $('qty').value);
+        if (scanMode === 'recv') addRecv(text, $('rQty').value); else if (scanMode === 'out') addOut(text, $('oQty').value); else addCount(text, $('qty').value);
         showHit(text);
         if (state.opt.auto) autoTimer = setTimeout(() => { lastScan.at = Date.now(); closeHit(); }, 1500);
       });
-      $(mode === 'recv' ? 'camBtn2' : 'camBtn').textContent = '■ カメラを止める';
+      $({ recv: 'camBtn2', out: 'camBtn3' }[mode] || 'camBtn').textContent = '■ カメラを止める';
     } catch (e) {
       scanner = null;
       toast('カメラを使えませんでした。ブラウザでカメラを許可してください');
@@ -961,10 +1001,11 @@
     if (!scanner) return;
     try { await scanner.stop(); scanner.clear(); } catch (e) {}
     scanner = null;
-    $('camBtn').textContent = '📷 カメラを起動'; $('camBtn2').textContent = '📷 カメラを起動';
+    for (const b of ['camBtn', 'camBtn2', 'camBtn3']) $(b).textContent = '📷 カメラを起動';
   }
   $('camBtn').addEventListener('click', () => scanner ? stopCamera() : startCamera('count'));
   $('camBtn2').addEventListener('click', () => scanner ? stopCamera() : startCamera('recv'));
+  $('camBtn3').addEventListener('click', () => scanner ? stopCamera() : startCamera('out'));
 
   // ---------- 一覧 ----------
   function renderList() {
@@ -1110,9 +1151,9 @@
   function buildTotal() {
     const map = {};
     const get = (code) => map[code] || (map[code] = { code, name: '', qty: 0, counted: false });
-    const lc = lastClose(), inQ = periodIn();
+    const lc = lastClose(), inQ = periodIn(), oq = periodOutQty();
     if (lc) for (const code of Object.keys(lc.counts)) get(code);
-    for (const code of Object.keys(inQ)) get(code);
+    for (const code of [...Object.keys(inQ), ...Object.keys(oq.sale), ...Object.keys(oq.use)]) get(code);
     for (const [code, c] of Object.entries(state.counts)) { const t = get(code); t.qty += c.qty; t.counted = true; }
     for (const m of merged) for (const r of m.rows) { const t = get(r.code); t.qty += r.qty; t.counted = true; if (!t.name) t.name = r.name; if (!t.cat0) t.cat0 = r.cat; }
     for (const [code, m] of Object.entries(state.master)) if (m.name || m.book !== null) get(code);
@@ -1120,12 +1161,18 @@
       const m = state.master[t.code] || {};
       const price = m.price || 0;
       const prev = lc ? (lc.counts[t.code] || 0) : null, inq = inQ[t.code] || 0;
-      // 帳簿（あるはずの数）＝ 前回の在庫＋入庫。確定前は商品マスタの帳簿数＋入庫
-      const book = lc ? prev + inq : (m.book != null ? m.book + inq : null);
-      const diff = book === null ? null : t.qty - book;
-      const used = diff === null ? null : -diff; // 使った量
-      return { ...t, cat: m.cat || t.cat0 || '', name: m.name || (state.lookup[t.code] && state.lookup[t.code].name) || t.name || '（マスタに無い商品）', price, prev, inq, book, diff, used, min: m.min ?? null,
-        amount: t.qty * price, diffAmount: diff === null ? null : diff * price, usedAmount: used === null ? null : used * price };
+      const sold = oq.sale[t.code] || 0, use = oq.use[t.code] || 0; // 記録した出庫（販売・材料使用）
+      // 帳簿（あるはずの数）＝ 前回の在庫＋入庫−出庫。確定前は商品マスタの帳簿数＋入庫−出庫
+      const book = lc ? prev + inq - sold - use : (m.book != null ? m.book + inq - sold - use : null);
+      const diff = book === null || !t.counted ? (book === null ? null : 0 - book) : t.qty - book; // マイナス＝記録外の減り
+      const cat = m.cat || t.cat0 || '';
+      const lost = diff !== null && diff < 0 ? -diff : 0;
+      // 材料として使った数：記録した材料使用＋（店販品以外は）記録外の減り
+      const matQty = use + (cat === RETAIL ? 0 : lost);
+      const used = book === null ? (use || null) : matQty; // 表示用「使った」
+      return { ...t, cat, name: m.name || (state.lookup[t.code] && state.lookup[t.code].name) || t.name || '（マスタに無い商品）', price, prev, inq, sold, use, book, diff, used, min: m.min ?? null,
+        sell: m.sell ?? null, lostRetail: cat === RETAIL ? lost : 0,
+        amount: t.qty * price, diffAmount: diff === null ? null : diff * price, usedAmount: matQty * price };
     }).sort((a, b) => Math.abs(b.diffAmount || 0) - Math.abs(a.diffAmount || 0) || a.code.localeCompare(b.code));
   }
 
@@ -1144,31 +1191,32 @@
     const all = everything.filter(t => !cf || (cf === '-' ? !t.cat : t.cat === cf));
     const amount = all.reduce((s, t) => s + t.amount, 0);
     const usedAmount = all.reduce((s, t) => s + (t.usedAmount || 0), 0);
-    const over = all.filter(t => t.used < 0).length;
+    const over = all.filter(t => t.diff > 0).length;
     const uncounted = all.filter(t => !t.counted).length;
     $('summary').innerHTML = `
       <div>在庫金額<b>${yen(amount)}</b></div>
-      <div>使った金額<b>${yen(usedAmount)}</b></div>
+      <div>材料費<b>${yen(usedAmount)}</b></div>
       <div>帳簿より多い品目<b class="${over ? 'plus' : ''}">${over}</b><span class="muted">入庫の入れ忘れかも</span></div>
       <div>未カウント<b>${uncounted}</b></div>`;
     renderCost(everything);
     const flt = document.querySelector('input[name=flt]:checked').value;
     const rows = all.filter(t => flt === 'all' || (flt === 'diff' ? t.diff : !t.counted));
     if (!all.length) { $('totalTable').innerHTML = '<tr><td class="muted">データがありません。設定で商品マスタを読み込むと、帳簿との差がわかります。</td></tr>'; return; }
-    const bookLabel = lastClose() ? '前回+入庫' : '帳簿';
-    $('totalTable').innerHTML = `<tr><th>商品</th><th class="num">実数</th><th class="num">${bookLabel}</th><th class="num">使った</th><th class="num">金額</th></tr>` +
+    $('totalTable').innerHTML = `<tr><th>商品</th><th class="num">実数</th><th class="num">帳簿</th><th class="num">差</th><th class="num">材料使用</th><th class="num">材料費</th></tr>` +
       rows.map(t => {
-        const cls = t.used < 0 ? 'plus' : t.used > 0 ? '' : 'zero';
-        return `<tr><td>${t.cat ? `<span class="cat-tag">${esc(t.cat)}</span>` : ''}${esc(t.name)}<br><span class="muted">${esc(t.code)}</span></td>
+        const cls = t.diff > 0 ? 'plus' : t.diff < 0 ? 'minus' : 'zero';
+        const sub = [t.inq ? `入庫${t.inq}` : '', t.sold ? `販売${t.sold}` : '', t.use ? `使用${t.use}` : ''].filter(Boolean).join('・');
+        return `<tr><td>${t.cat ? `<span class="cat-tag">${esc(t.cat)}</span>` : ''}${esc(t.name)}<br><span class="muted">${esc(t.code)}${sub ? '　' + sub : ''}</span></td>
           <td class="num">${t.counted ? t.qty : '<span class="muted">未</span>'}</td>
           <td class="num">${t.book ?? '-'}</td>
-          <td class="num ${cls}">${t.used === null ? '-' : t.used < 0 ? '多い ' + (-t.used) : t.used}</td>
-          <td class="num ${cls}">${t.usedAmount === null ? '-' : yen(t.usedAmount)}</td></tr>`;
-      }).join('');
+          <td class="num ${cls}">${t.diff === null ? '-' : (t.diff > 0 ? '+' : '') + t.diff}</td>
+          <td class="num">${t.used ?? '-'}</td>
+          <td class="num">${t.usedAmount ? yen(t.usedAmount) : '-'}</td></tr>`;
+      }).join('') + `<tr><td colspan="6" class="muted">帳簿＝前回の在庫＋入庫−出庫。差のマイナスは記録外の減りで、店販品以外は材料として使った分として材料費に入ります。</td></tr>`;
   }
   $('exportTotalBtn').addEventListener('click', () => {
-    const rows = [['バーコード', '商品名', '種類', '前回在庫', '入庫', '帳簿数', '実数', '使った数', '単価', '在庫金額', '使った金額', '発注点']];
-    for (const t of buildTotal()) rows.push([t.code, t.name, t.cat, t.prev ?? '', t.inq || '', t.book ?? '', t.counted ? t.qty : '', t.used ?? '', t.price, t.amount, t.usedAmount ?? '', t.min ?? '']);
+    const rows = [['バーコード', '商品名', '種類', '前回在庫', '入庫', '販売', '材料使用（記録）', '帳簿数', '実数', '差', '材料使用（合計）', '仕入単価', '在庫金額', '材料費', '販売単価', '発注点']];
+    for (const t of buildTotal()) rows.push([t.code, t.name, t.cat, t.prev ?? '', t.inq || '', t.sold || '', t.use || '', t.book ?? '', t.counted ? t.qty : '', t.diff ?? '', t.used ?? '', t.price, t.amount, t.usedAmount || '', t.sell ?? '', t.min ?? '']);
     download(`サロンストック_集計_${stamp()}.csv`, toCSV(rows));
   });
 
@@ -1354,23 +1402,26 @@
   // ========== 材料費・発注・確定 ==========
   const RETAIL = '店販品';
   function costOf(list) {
-    let material = 0, retail = 0;
-    for (const t of list) if (t.usedAmount != null) { if (t.cat === RETAIL) retail += t.usedAmount; else material += t.usedAmount; }
-    return { material, retail };
+    let material = 0, lost = 0;
+    for (const t of list) { material += t.usedAmount || 0; lost += (t.lostRetail || 0) * (t.price || 0); }
+    const outs = periodOuts();
+    const retail = outs.filter(o => o.type === 'sale').reduce((s, o) => s + outAmount(o), 0); // 店販の売上（税抜）
+    return { material, retail, lost };
   }
   function renderCost(all) {
     const lc = lastClose(), recs = periodReceipts();
     const buy = recs.reduce((s, r) => s + slipAmount(r), 0);
     $('periodInfo').innerHTML = lc
-      ? `前回の確定：<b>${esc(lc.date)}</b>　今期の入庫：${recs.length} 件`
+      ? `前回の確定：<b>${esc(lc.date)}</b>　今期の入庫：${recs.length} 件　出庫：${periodOuts().length} 件`
       : 'まだ確定したことがありません。今回の棚卸を確定すると、次の期間から「前回の在庫＋入庫−今回の在庫」で材料費を計算します。';
-    const { material, retail } = costOf(all);
+    const { material, retail, lost } = costOf(all);
     const sales = Number(state.sales) || 0;
     $('costSummary').innerHTML = `
-      <div>材料費<b>${lc ? yen(material) : '-'}</b><span class="muted">店販品を除く</span></div>
-      <div>店販品の出庫<b>${lc ? yen(retail) : '-'}</b></div>
+      <div>材料費<b>${yen(material)}</b><span class="muted">${lc ? '記録した使用＋棚卸の差' : '記録した使用のみ（確定後は棚卸の差も）'}</span></div>
+      <div>店販の売上（税抜）<b>${yen(retail)}</b><span class="muted">出庫で記録した販売</span></div>
       <div>今期の仕入額<b>${yen(buy)}</b></div>
-      <div>材料費の原価率<b>${lc && sales ? (material / sales * 100).toFixed(1) + '%' : '-'}</b><span class="muted">技術売上を入れると出ます</span></div>`;
+      <div>材料費の原価率<b>${sales ? (material / sales * 100).toFixed(1) + '%' : '-'}</b><span class="muted">技術売上を入れると出ます</span></div>
+      ${lost ? `<div>店販品の記録外の減り<b class="minus">${yen(lost)}</b><span class="muted">販売の記録漏れ・紛失など</span></div>` : ''}`;
     if (document.activeElement !== $('sales')) $('sales').value = state.sales || '';
     // 仕入先ごとの金額
     const bySup = {};
@@ -1387,7 +1438,7 @@
       : '<p class="muted">今のところ、発注が必要な商品はありません。</p>';
     // これまでの材料費
     $('closeHist').innerHTML = state.closes.length
-      ? '<div class="table-wrap"><table><tr><th>確定日</th><th class="num">材料費</th><th class="num">店販品</th><th class="num">仕入額</th><th class="num">原価率</th></tr>' +
+      ? '<div class="table-wrap"><table><tr><th>確定日</th><th class="num">材料費</th><th class="num">店販</th><th class="num">仕入額</th><th class="num">原価率</th></tr>' +
         state.closes.slice().reverse().map(c => `<tr><td>${esc(c.date)}</td><td class="num">${c.summary.first ? '-' : yen(c.summary.material)}</td><td class="num">${c.summary.first ? '-' : yen(c.summary.retail)}</td><td class="num">${yen(c.summary.buy)}</td><td class="num">${c.summary.rate != null ? c.summary.rate + '%' : '-'}</td></tr>`).join('') +
         '</table></div><div class="btns"><button id="undoClose" class="btn">最後の確定を取り消す</button></div>'
       : '<p class="muted">棚卸を確定すると、ここに期間ごとの材料費が並びます。</p>';
@@ -1401,13 +1452,13 @@
     const uncounted = all.filter(t => !t.counted).length;
     if (!confirm(`今日（${today()}）の棚卸を確定しますか？` + (uncounted ? `\n未カウントの ${uncounted} 品目は0個として確定されます。` : '') + '\n確定すると数えた結果は空になります。'
       + (merged.length ? '\n読み込んだ他の人のCSVも含めて確定します。' : ''))) return;
-    const lc = lastClose(), { material, retail } = costOf(all);
+    const lc = lastClose(), { material, retail, lost } = costOf(all);
     const sales = Number(state.sales) || 0;
     const counts = {}, prices = {};
     for (const t of all) { counts[t.code] = t.counted ? t.qty : 0; prices[t.code] = t.price; }
     state.closes.push({ date: today(), at: Date.now(), counts, prices,
       saved: JSON.parse(JSON.stringify(state.counts)), // 取り消し用
-      summary: { first: !lc, material, retail, buy: periodReceipts().reduce((s, r) => s + slipAmount(r), 0), sales, rate: lc && sales ? +(material / sales * 100).toFixed(1) : null } });
+      summary: { first: false, material, retail, lost, buy: periodReceipts().reduce((s, r) => s + slipAmount(r), 0), sales, rate: lc && sales ? +(material / sales * 100).toFixed(1) : null } });
     state.counts = {}; state.history = []; state.sales = ''; merged = [];
     save(); render(); toast('棚卸を確定しました');
   });
@@ -1458,6 +1509,117 @@
     save(); renderBilling();
   });
 
+  // ========== 出庫（店販の販売・材料としての使用） ==========
+  const outAmount = (o) => o.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.sell) || 0), 0);
+  function periodOuts() { const lc = lastClose(); return state.outs.filter(o => !lc || o.created > lc.at); }
+  function periodOutQty() {
+    const q = { sale: {}, use: {} };
+    for (const o of periodOuts()) for (const l of o.lines) q[o.type][l.code] = (q[o.type][l.code] || 0) + (Number(l.qty) || 0);
+    return q;
+  }
+  function addOut(code, qty) {
+    code = String(code).trim(); if (!code) return;
+    qty = Number(qty); if (!Number.isFinite(qty)) qty = 1;
+    let line = state.oDraft.lines.find(l => l.code === code);
+    if (!line) {
+      const m = state.master[code] || {};
+      line = { code, qty: 0, sell: m.sell ?? '' };
+      state.oDraft.lines.unshift(line);
+    }
+    line.qty += qty;
+    if (line.qty <= 0) state.oDraft.lines = state.oDraft.lines.filter(l => l !== line);
+    save(); if (qty > 0) { beep(); flash(); }
+    renderOut();
+  }
+  function addOutFromInput() {
+    const code = $('oCode').value.trim();
+    if (!code) { $('oCode').focus(); return; }
+    if (!scanner) scanMode = 'out';
+    addOut(code, $('oQty').value);
+    $('oCode').value = '';
+    showHit(code);
+  }
+  $('oAddBtn').addEventListener('click', addOutFromInput);
+  $('oCode').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addOutFromInput(); } });
+  $('oType').addEventListener('click', e => {
+    const t = e.target.dataset.otype; if (!t) return;
+    state.oDraft.type = t; save(); renderOut();
+  });
+  $('oDate').addEventListener('change', e => { state.oDraft.date = e.target.value; save(); });
+  $('oCust').addEventListener('input', e => { state.oDraft.customer = e.target.value; save(); });
+  document.addEventListener('change', e => {
+    const t = e.target, sc = t.dataset && t.dataset.osell, qc = t.dataset && t.dataset.oq;
+    if (sc === undefined && qc === undefined) return;
+    const line = state.oDraft.lines.find(l => l.code === (sc ?? qc)); if (!line) return;
+    if (sc !== undefined) {
+      line.sell = t.value === '' ? '' : Number(t.value);
+      if (line.sell !== '') { const m = state.master[line.code] || (state.master[line.code] = { name: '', price: 0, book: null }); m.sell = line.sell; } // 売価を覚える
+    } else { line.qty = Number(t.value) || 0; if (line.qty <= 0) state.oDraft.lines = state.oDraft.lines.filter(l => l !== line); }
+    save(); renderOut();
+  });
+  $('oTable').addEventListener('click', e => {
+    const c = e.target.dataset.odel; if (c === undefined) return;
+    state.oDraft.lines = state.oDraft.lines.filter(l => l.code !== c); save(); renderOut();
+  });
+  function renderOut() {
+    const d = state.oDraft;
+    if (!d.date) d.date = today();
+    if ($('oDate').value !== d.date) $('oDate').value = d.date;
+    if (document.activeElement !== $('oCust')) $('oCust').value = d.customer || '';
+    const sale = d.type !== 'use';
+    $('oType').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.otype === d.type));
+    $('oCustWrap').style.visibility = sale ? 'visible' : 'hidden';
+    $('custList').innerHTML = uniq(state.outs.map(o => o.customer).filter(Boolean)).map(x => `<option value="${esc(x)}">`).join('');
+    if (!d.lines.length) {
+      $('oTable').innerHTML = `<tr><td class="muted">${sale ? '販売した商品' : '材料として使った商品'}のバーコードを読んでください。</td></tr>`;
+      $('oTotal').textContent = '';
+    } else {
+      $('oTable').innerHTML = `<tr><th>商品</th><th class="num">数</th>${sale ? '<th class="num">単価</th><th class="num">金額</th>' : ''}<th></th></tr>` + d.lines.map(l => `
+        <tr><td>${catTag(l.code)}${esc(nameOf(l.code))}<br><span class="muted">${esc(l.code)}</span></td>
+        <td class="num"><input class="qty-input" style="width:56px" type="number" value="${esc(l.qty)}" data-oq="${esc(l.code)}"></td>
+        ${sale ? `<td class="num"><input class="qty-input" type="number" inputmode="numeric" placeholder="円" value="${esc(l.sell)}" data-osell="${esc(l.code)}"></td>
+        <td class="num">${l.sell === '' ? '-' : yen(l.qty * l.sell)}</td>` : ''}
+        <td><button class="btn danger" data-odel="${esc(l.code)}" aria-label="削除">✕</button></td></tr>`).join('');
+      const qty = d.lines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+      if (sale) {
+        const amt = outAmount(d), tax = Math.round(amt * TAX);
+        $('oTotal').textContent = `${qty} 個 / ${yen(amt)} ＋ 消費税 ${yen(tax)} ＝ ${yen(amt + tax)}`;
+      } else $('oTotal').textContent = `${d.lines.length} 品目 / ${qty} 個（材料費 ${yen(d.lines.reduce((s, l) => s + l.qty * ((state.master[l.code] || {}).price || 0), 0))}）`;
+    }
+    renderOutHistory();
+  }
+  $('oSave').addEventListener('click', () => {
+    const d = state.oDraft;
+    if (!d.lines.length) { toast('商品がありません'); return; }
+    const o = { id: 'o' + Date.now().toString(36), date: d.date || today(), type: d.type === 'use' ? 'use' : 'sale', customer: d.type === 'use' ? '' : (d.customer || '').trim(),
+      lines: d.lines.map(l => ({ code: l.code, qty: Number(l.qty) || 0, sell: l.sell === '' ? '' : Number(l.sell) })), created: Date.now() };
+    state.outs.push(o);
+    state.oDraft = { date: today(), type: o.type, customer: '', lines: [] };
+    save(); renderOut();
+    toast(o.type === 'sale' ? `販売を記録しました（${yen(outAmount(o))}＋税）` : '材料の使用を記録しました');
+  });
+  $('oClear').addEventListener('click', () => {
+    if (!state.oDraft.lines.length) return;
+    if (!confirm('入力中の出庫を消して、やり直しますか？')) return;
+    state.oDraft = { date: today(), type: state.oDraft.type, customer: '', lines: [] }; save(); renderOut();
+  });
+  function renderOutHistory() {
+    const list = state.outs.slice().reverse().slice(0, 50);
+    if (!list.length) { $('oHistory').innerHTML = '<p class="muted">まだありません。</p>'; return; }
+    const lc = lastClose();
+    $('oHistory').innerHTML = list.map(o => `
+      <details class="rename"><summary>${esc(md(o.date))}　${o.type === 'sale' ? '🛍 販売' : '✂️ 材料'}　${o.customer ? esc(o.customer) + '　' : ''}${o.lines.length}品目${o.type === 'sale' ? '　' + yen(outAmount(o)) : ''}${lc && o.created <= lc.at ? '　<span class="muted">確定済み</span>' : ''}</summary>
+        <div class="table-wrap"><table>${o.lines.map(l => `<tr><td>${esc(nameOf(l.code))}</td><td class="num">${l.qty}</td>${o.type === 'sale' ? `<td class="num">${l.sell === '' ? '-' : yen(l.sell)}</td>` : ''}</tr>`).join('')}</table></div>
+        <div class="btns"><button class="btn danger" data-ocdel="${esc(o.id)}">この出庫を削除</button></div>
+      </details>`).join('');
+  }
+  $('oHistory').addEventListener('click', e => {
+    const id = e.target.dataset.ocdel; if (id === undefined) return;
+    const o = state.outs.find(x => x.id === id); if (!o) return;
+    if (!confirm(`${md(o.date)} の出庫を削除しますか？`)) return;
+    state.outs = state.outs.filter(x => x.id !== id); save(); renderOut();
+  });
+
   // ========== 販売単価（店販の売価） ==========
   document.addEventListener('change', e => {
     const c = e.target.dataset && e.target.dataset.sell; if (c === undefined) return;
@@ -1483,18 +1645,26 @@
       const pr = num(l.price);
       rows.push([toDate(r.date), l.code, nm(l.code), l.qty, pr, pr == null ? null : pr * l.qty, null, null, null, null, null, null, null, null, r.supplier || null]);
     }
-    const usedDate = toDate(today()); // 材料使用・出庫は書き出した日付でまとめて1行
-    for (const t of all) {
-      if (t.used == null || t.used <= 0) continue;
-      const pr = t.price || null;
-      if (t.cat === RETAIL) { // 店販品は「出庫」として販売金額を出す
-        const sell = num((state.master[t.code] || {}).sell);
-        const amt = sell == null ? null : sell * t.used;
-        rows.push([usedDate, t.code, t.name, null, pr, null, null, null, t.used, sell, amt, amt == null ? null : Math.round(amt * TAX), amt == null ? null : amt + Math.round(amt * TAX), null, null]);
-      } else { // それ以外は「材料使用」
-        rows.push([usedDate, t.code, t.name, null, pr, null, t.used, pr == null ? null : pr * t.used, null, null, null, null, null, null, null]);
+    // 出庫（1件ずつ）：店販の販売・材料としての使用
+    const cost = (c) => (state.master[c] || {}).price || null;
+    for (const o of periodOuts()) for (const l of o.lines) {
+      const pr = cost(l.code);
+      if (o.type === 'sale') {
+        const sell = num(l.sell), amt = sell == null ? null : sell * l.qty, tax = amt == null ? null : Math.round(amt * TAX);
+        rows.push([toDate(o.date), l.code, nm(l.code), null, pr, null, null, null, l.qty, sell, amt, tax, amt == null ? null : amt + tax, o.customer || null, null]);
+      } else {
+        rows.push([toDate(o.date), l.code, nm(l.code), null, pr, null, l.qty, pr == null ? null : pr * l.qty, null, null, null, null, null, null, null]);
       }
     }
+    // 記録しなかった材料の使用（棚卸の差から）は、書き出した日付でまとめて1行
+    const usedDate = toDate(today());
+    for (const t of all) {
+      const extra = (t.used || 0) - (t.use || 0);
+      if (t.cat === RETAIL || extra <= 0) continue;
+      const pr = t.price || null;
+      rows.push([usedDate, t.code, t.name, null, pr, null, extra, pr == null ? null : pr * extra, null, null, null, null, null, '（棚卸の差から）', null]);
+    }
+    rows.sort((a, b) => a[0] - b[0]);
     const sum = (i) => rows.reduce((s, r) => s + (Number(r[i]) || 0), 0);
     const sheet1 = [
       [null, null, null, '仕入', sum(5), null, '材料費', sum(7), null, '商品販売', sum(12)],
@@ -1551,7 +1721,7 @@
       catch (e) { if (e.name !== 'AbortError') saveFile(file); }
     } else { saveFile(file); toast('共有に対応していないため、ファイルとして保存しました'); }
   });
-  function render() { renderList(); renderTotal(); renderMasterInfo(); renderRecv(); }
+  function render() { renderList(); renderTotal(); renderMasterInfo(); renderRecv(); renderOut(); }
   load();
   showDraftPhoto();
   $('staff').value = state.staff; $('place').value = state.place;
