@@ -59,6 +59,12 @@
   .sup-chips button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
   .warn-line { color: var(--bad); font-weight: bold; }
   .edit-bar { scroll-margin-top: 140px; background: var(--hl); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+  .gate { position: fixed; inset: 0; z-index: 900; background: var(--bg); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .gate-box { max-width: 560px; margin: 0 auto; padding: calc(env(safe-area-inset-top) + 20px) 16px 40px; }
+  .gate-steps { display: flex; gap: 8px; font-size: 13px; }
+  .gate-steps span { padding: 4px 10px; border-radius: 999px; background: var(--line); color: var(--muted); }
+  .gate-steps span.on { background: var(--accent); color: var(--accent-text); }
+  .gate-steps span.done { background: color-mix(in srgb, var(--ok) 20%, var(--bg)); color: var(--ok); }
   .sup-in { margin-top: 4px; padding: 6px 8px; font-size: 14px; max-width: 220px; }
   .row > .narrow { flex: 0 0 96px; }
   button.btn { padding: 12px 14px; font-size: 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; }
@@ -151,7 +157,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.6</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.7</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -303,6 +309,7 @@
       <label for="sales">今期の技術売上（円）※原価率を出したいときだけ</label>
       <input id="sales" type="number" inputmode="numeric" placeholder="例：1500000">
       <div id="supplierSum" style="margin-top:10px"></div>
+      <div id="minNeed"></div>
       <div class="btns"><button id="closeBtn" class="btn primary">棚卸を確定して次の期間へ</button></div>
       <p class="muted">確定すると、今回数えた数が次の期間の「前回の在庫」になり、数えた結果は空になります。未カウントの商品は0個として確定されます。</p>
     </div>
@@ -355,7 +362,7 @@
     <div class="card" id="cloudCard">
       <h2>☁️ お店のクラウド</h2>
       <div id="cloudOut">
-        <p class="muted">ログインすると、データをお店ごとのクラウドに保存し、オーナーとスタッフで共有できます。スマホをなくしても消えません。ログインしなければ、今までどおりこのスマホの中だけで使えます。</p>
+        <p class="muted">データはお店ごとのクラウドに保存され、オーナーとスタッフで共有できます。スマホをなくしても消えません。</p>
         <div class="btns"><button id="cGoogle" class="btn primary" style="background:#fff;color:#222;border:1px solid #ccc">
           <svg width="18" height="18" viewBox="0 0 48 48" style="vertical-align:-3px;margin-right:6px" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.2l7.9 6.2C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.7c4.3-4 6.9-9.9 6.9-17.1z"/><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.2C1 16.6 0 20.2 0 24s1 7.4 2.7 10.8l7.9-6.2z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.2 0-11.5-4.1-13.4-9.9l-7.9 6.2C6.6 42.6 14.6 48 24 48z"/></svg>Googleでログイン</button></div>
         <p class="muted" style="text-align:center;margin:8px 0">または、メールアドレスで</p>
@@ -452,6 +459,14 @@
   </section>
 </main>
 <div class="toast" id="toast"></div>
+<!-- はじめの設定（ログインとお店が決まるまで、ほかの画面は使えない） -->
+<div id="gate" class="gate" style="display:none"><div class="gate-box">
+  <h1 style="margin:0 0 4px">サロンストック</h1>
+  <div class="gate-steps"><span id="gs1">① ログイン</span><span id="gs2">② オーナーかスタッフか</span></div>
+  <h2 id="gateTitle" style="margin:12px 0 4px"></h2>
+  <p class="muted" id="gateMsg" style="margin-top:0"></p>
+  <div id="gateSlot"></div>
+</div></div>
 <input type="file" id="ocrFile" accept="image/*" capture="environment" hidden>
 <div class="crop" id="crop">
   <div class="crop-box">
@@ -1148,7 +1163,7 @@
         <input class="sup-in" list="supList2" placeholder="仕入先" value="${esc(supOfItem(code))}" data-sup="${esc(code)}" aria-label="仕入先"></td>
         <td class="muted">${places}</td>
         <td class="num"><input class="qty-input" type="number" value="${c.qty}" data-code="${esc(code)}"></td>
-        <td class="num"><input class="qty-input" type="number" min="0" placeholder="-" value="${esc(state.master[code] && state.master[code].min != null ? state.master[code].min : '')}" data-min="${esc(code)}" aria-label="発注点"></td>
+        <td class="num"><input class="qty-input" type="number" min="0" placeholder="${(state.master[code] || {}).min === -1 ? '頼まない' : '-'}" value="${esc(state.master[code] && state.master[code].min != null && state.master[code].min >= 0 ? state.master[code].min : '')}" data-min="${esc(code)}" aria-label="発注点"></td>
         <td><button class="btn danger" data-del="${esc(code)}" aria-label="削除">✕</button></td></tr>`;
     }).join('');
   }
@@ -1349,7 +1364,7 @@
   }
   $('exportTotalBtn').addEventListener('click', () => {
     const rows = [['バーコード', '商品名', '種類', '前回在庫', '入庫', '販売', '材料使用（記録）', '帳簿数', '実数', '差', '材料使用（合計）', '仕入単価', '在庫金額', '材料費', '販売単価', '発注点']];
-    for (const t of buildTotal()) rows.push([t.code, t.name, t.cat, t.prev ?? '', t.inq || '', t.sold || '', t.use || '', t.book ?? '', t.counted ? t.qty : '', t.diff ?? '', t.used ?? '', t.price, t.amount, t.usedAmount || '', t.sell ?? '', t.min ?? '']);
+    for (const t of buildTotal()) rows.push([t.code, t.name, t.cat, t.prev ?? '', t.inq || '', t.sold || '', t.use || '', t.book ?? '', t.counted ? t.qty : '', t.diff ?? '', t.used ?? '', t.price, t.amount, t.usedAmount || '', t.sell ?? '', t.min === -1 ? '頼まない' : (t.min ?? '')]);
     download(`サロンストック_集計_${stamp()}.csv`, toCSV(rows));
   });
 
@@ -1708,9 +1723,30 @@
   $('monthly').addEventListener('toggle', e => { if (e.target.id === 'msBox') state._msOpen = e.target.open; }, true);
   $('sales').addEventListener('input', e => { state.sales = e.target.value; save(); cloudHook('settings'); renderCost(buildTotal()); });
 
+  // 確定の前に、発注点（これ以下になったら頼む数）が入っていない商品を全部入れてもらう。-1＝頼まない
+  const needsMin = (all) => all.filter(t => t.min == null && (t.counted || (t.book || 0) > 0 || (t.prev || 0) > 0));
+  function renderMinNeed(list) {
+    if (!list.length) { $('minNeed').innerHTML = ''; return; }
+    $('minNeed').innerHTML = `<div class="edit-bar" style="margin-top:10px"><b>確定の前に、発注点を入れてください（あと ${list.length} 品目）</b>
+      <div class="muted">残りがこの数以下になったら「発注の目安」に出ます。頼まない商品は「頼まない」を押してください。</div></div>
+      <div class="table-wrap"><table>${list.map(t => `<tr><td>${t.cat ? `<span class="cat-tag">${esc(t.cat)}</span>` : ''}${esc(t.name)}<br><span class="muted">今 ${t.counted ? t.qty : (t.book ?? 0)} 個</span></td>
+        <td class="num"><input class="qty-input" type="number" min="0" inputmode="numeric" placeholder="数" data-needmin="${esc(t.code)}" aria-label="発注点"></td>
+        <td><button class="btn" style="white-space:nowrap" data-nomin="${esc(t.code)}">頼まない</button></td></tr>`).join('')}</table></div>`;
+  }
+  const setMin = (code, v) => { const m = state.master[code] || (state.master[code] = { name: '', price: 0, book: null }); m.min = v; save(); cloudHook('item', code); };
+  $('minNeed').addEventListener('change', e => {
+    const c = e.target.dataset.needmin; if (c === undefined || e.target.value === '') return;
+    setMin(c, Math.max(0, Number(e.target.value) || 0)); setTimeout(() => renderMinNeed(needsMin(buildTotal())), 0);
+  });
+  $('minNeed').addEventListener('click', e => {
+    const c = e.target.dataset.nomin; if (c === undefined) return;
+    setMin(c, -1); renderMinNeed(needsMin(buildTotal()));
+  });
   $('closeBtn').addEventListener('click', () => {
     const all = buildTotal();
     if (!all.some(t => t.counted)) { toast('まだ数えていません'); return; }
+    const miss = needsMin(all);
+    if (miss.length) { renderMinNeed(miss); $('minNeed').scrollIntoView({ behavior: 'smooth', block: 'start' }); toast(`発注点が入っていない商品が ${miss.length} 品目あります`); return; }
     const uncounted = all.filter(t => !t.counted).length;
     if (!confirm(`今日（${today()}）の棚卸を確定しますか？` + (uncounted ? `\n未カウントの ${uncounted} 品目は0個として確定されます。` : '') + '\n確定すると数えた結果は空になります。'
       + (merged.length ? '\n読み込んだ他の人のCSVも含めて確定します。' : ''))) return;
@@ -2503,10 +2539,10 @@
     async function fillUI() {
       $('cloudOut').style.display = user ? 'none' : '';
       $('cloudIn').style.display = user ? '' : 'none';
-      if (!user) return;
+      if (!user) { gate(); return; }
       $('cWho').textContent = user.email;
       const list = await mySalons().catch(() => ({}));
-      $('cSalon').innerHTML = '<option value="">（クラウドを使わない：このスマホだけ）</option>' + Object.entries(list).map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join('');
+      $('cSalon').innerHTML = (salon ? '' : '<option value="">（お店を選んでください）</option>') + Object.entries(list).map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join('');
       $('cSalon').value = salon in list || !salon ? salon : '';
       const none = !Object.keys(list).length && !salon; // まだお店が無い：作る／参加するを大きく出す
       $('cloudIn').classList.toggle('nosalon', none);
@@ -2519,7 +2555,31 @@
       let hasLocal = false; try { const b = JSON.parse(localStorage.getItem(LOCAL_BACKUP)); hasLocal = !!b && (Object.keys(b.master || {}).length || (b.receipts || []).length || (b.outs || []).length || Object.keys(b.counts || {}).length); } catch (e) {}
       const migrated = !!localStorage.getItem(LOCAL_BACKUP + ':migrated:' + salon);
       $('cMigrate').style.display = salon && money() && hasLocal && !migrated ? '' : 'none';
-      status();
+      // 前にこのスマホだけで使っていたデータがあれば、1回だけ移すか聞く
+      const askKey = LOCAL_BACKUP + ':asked:' + salon;
+      if ($('cMigrate').style.display === '' && !localStorage.getItem(askKey)) {
+        try { localStorage.setItem(askKey, '1'); } catch (e) {}
+        setTimeout(() => { if (confirm('このスマホに、ログインする前に記録したデータがあります。このお店のクラウドへ移しますか？\n（あとで「設定」からも移せます）')) { $('cMigrate').dataset.asked = '1'; $('cMigrate').click(); } }, 300);
+      }
+      status(); gate();
+    }
+    // はじめの設定：ログインしていない、またはお店が決まっていないときは、設定の画面だけを全面に出す
+    function gate() {
+      const need = !user || !salon, card = $('cloudCard');
+      document.body.style.overflow = need ? 'hidden' : '';
+      $('gate').style.display = need ? '' : 'none';
+      if (need) {
+        if (card.parentElement !== $('gateSlot')) $('gateSlot').appendChild(card);
+        $('gs1').className = user ? 'done' : 'on'; $('gs2').className = user ? 'on' : '';
+        $('gs1').textContent = user ? '✓ ログイン' : '① ログイン';
+        const hasSalon = $('cSalon').options.length > 1;
+        $('gateTitle').textContent = !user ? 'はじめに、ログインしてください' : hasSalon ? 'お店を選んでください' : 'オーナーですか？スタッフですか？';
+        $('gateMsg').textContent = !user ? 'サロンストックは、お店ごとにクラウドに保存して使います（スマホをなくしても消えません）。Googleかメールアドレスでログインしてください。'
+          : hasSalon ? '下の「お店」から選んでください。新しく作ることもできます。'
+          : 'お店のオーナーは「お店を作る」、スタッフはオーナーから届いた招待コードで「参加」してください。';
+      } else if (card.parentElement === $('gateSlot')) {
+        $('tab-setting').insertBefore(card, $('tab-setting').firstChild);
+      }
     }
     async function renderMembers() {
       try {
@@ -2558,7 +2618,7 @@
       try { localStorage.removeItem(USER_KEY); localStorage.removeItem(USER_KEY + ':salon'); } catch (x) {}
       fillUI(); toast('ログアウトしました');
     });
-    $('cSalon').addEventListener('change', e => chooseSalon(e.target.value));
+    $('cSalon').addEventListener('change', e => { if (e.target.value) chooseSalon(e.target.value); });
     $('cSyncNow').addEventListener('click', e => busy(e.target, async () => { await flush().catch(() => {}); await pull(); fillUI(); toast('同期しました'); }));
     $('cCreate').addEventListener('click', e => busy(e.target, async () => {
       const name = $('cNewName').value.trim(); if (!name) throw new Error('お店の名前を入れてください');
@@ -2602,7 +2662,8 @@
       } catch (x) { toast('抜けられませんでした'); }
     });
     $('cMigrate').addEventListener('click', e => busy(e.target, async () => {
-      if (!confirm('このスマホに入っている商品・入庫・出庫・確定・数えた結果を、今のお店のクラウドに移します。よろしいですか？（1回だけ行ってください）')) return;
+      const asked = e.target.dataset.asked; delete e.target.dataset.asked;
+      if (!asked && !confirm('このスマホに入っている商品・入庫・出庫・確定・数えた結果を、今のお店のクラウドに移します。よろしいですか？（1回だけ行ってください）')) return;
       const n = await migrate();
       try { localStorage.setItem(LOCAL_BACKUP + ':migrated:' + salon, '1'); } catch (x) {}
       toast(`クラウドに移しました（${n} 件）`); cc.since = {}; await pull(); fillUI();
