@@ -122,7 +122,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.0</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.1</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -318,6 +318,9 @@
       <h2>☁️ お店のクラウド</h2>
       <div id="cloudOut">
         <p class="muted">ログインすると、データをお店ごとのクラウドに保存し、オーナーとスタッフで共有できます。スマホをなくしても消えません。ログインしなければ、今までどおりこのスマホの中だけで使えます。</p>
+        <div class="btns"><button id="cGoogle" class="btn primary" style="background:#fff;color:#222;border:1px solid #ccc">
+          <svg width="18" height="18" viewBox="0 0 48 48" style="vertical-align:-3px;margin-right:6px" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.2l7.9 6.2C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.7c4.3-4 6.9-9.9 6.9-17.1z"/><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.2C1 16.6 0 20.2 0 24s1 7.4 2.7 10.8l7.9-6.2z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.2 0-11.5-4.1-13.4-9.9l-7.9 6.2C6.6 42.6 14.6 48 24 48z"/></svg>Googleでログイン</button></div>
+        <p class="muted" style="text-align:center;margin:8px 0">または、メールアドレスで</p>
         <label for="cEmail">メールアドレス</label>
         <input id="cEmail" type="email" autocomplete="username" inputmode="email">
         <label for="cPass">パスワード（6文字以上）</label>
@@ -1874,6 +1877,43 @@
       if (!r.ok) throw new Error(authErr(j));
       return j;
     }
+    // ---------- Googleでログイン（Firebase の部品を使い、結果の鍵だけ受け取る） ----------
+    const GSDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
+    let gAuthP = null, gAuth = null;
+    function googleAuth() {
+      return gAuthP || (gAuthP = (async () => {
+        const [app, au] = await Promise.all([import(GSDK + 'firebase-app.js'), import(GSDK + 'firebase-auth.js')]);
+        const a = app.initializeApp({ apiKey: C.key, authDomain: (EMU ? 'demo-salon' : C.pid) + '.firebaseapp.com', projectId: C.pid }, 'cloud-google');
+        const auth = au.initializeAuth(a, { persistence: au.inMemoryPersistence, popupRedirectResolver: au.browserPopupRedirectResolver });
+        if (EMU) au.connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+        return (gAuth = { au, auth });
+      })().catch(e => { gAuthP = null; throw e; }));
+    }
+    const gErr = (e) => {
+      const c = (e && e.code) || '';
+      return /popup-closed-by-user|cancelled-popup-request|user-cancelled/.test(c) ? 'ログインをやめました'
+        : /popup-blocked/.test(c) ? 'ログイン用の画面が開けませんでした。もう一度「Googleでログイン」を押してください'
+        : /unauthorized-domain/.test(c) ? 'Firebase の「承認済みドメイン」に ' + location.hostname + ' が入っていません'
+        : /operation-not-allowed/.test(c) ? 'Firebase で Google のログインが有効になっていません'
+        : /account-exists-with-different-credential/.test(c) ? 'このメールアドレスはメール／パスワードで登録されています。下のメールアドレスでログインしてください'
+        : /network-request-failed/.test(c) ? '通信できませんでした。電波を確認してください'
+        : 'Googleでログインできませんでした（' + (c || (e && e.message) || '不明') + '）';
+    };
+    async function googleLogin() {
+      if (!gAuth) { // 部品がまだ届いていない（届いたらもう一度押してもらう：iPhoneは押した直後でないと画面を開けないため）
+        try { await googleAuth(); } catch (e) { throw new Error('ログインの部品を読み込めませんでした。電波を確認してください'); }
+        throw new Error('準備ができました。もう一度「Googleでログイン」を押してください');
+      }
+      const { au, auth } = gAuth;
+      const prov = new au.GoogleAuthProvider(); prov.setCustomParameters({ prompt: 'select_account' });
+      let cred; try { cred = await au.signInWithPopup(auth, prov); } catch (e) { throw new Error(gErr(e)); }
+      const u = cred.user, t = await u.getIdTokenResult();
+      if (!u.email) throw new Error('Googleのアカウントにメールアドレスがありません');
+      setUser({ localId: u.uid, idToken: t.token, refreshToken: u.refreshToken, expiresIn: Math.max(60, (Date.parse(t.expirationTime) - Date.now()) / 1000) }, u.email);
+      au.signOut(auth).catch(() => {}); // 以後はアプリ側でログインを続ける
+    }
+    const preloadGoogle = () => { if (!user && navigator.onLine !== false) googleAuth().catch(() => {}); };
+
     const setUser = (j, email) => {
       user = { uid: j.localId || j.user_id, email: email || j.email, idToken: j.idToken || j.id_token, refreshToken: j.refreshToken || j.refresh_token, exp: Date.now() + Number(j.expiresIn || j.expires_in || 3600) * 1000 };
       try { localStorage.setItem(USER_KEY, JSON.stringify(user)); } catch (e) {}
@@ -2251,6 +2291,11 @@
       } catch (e) { $('cMembers').textContent = '読み込めませんでした：' + e.message; }
     }
     const busy = async (btn, fn) => { btn.disabled = true; $('cMsg').textContent = ''; try { await fn(); } catch (e) { $('cMsg').textContent = e.message; } finally { btn.disabled = false; } };
+    $('cGoogle').addEventListener('click', e => busy(e.currentTarget, async () => {
+      await googleLogin(); toast('ログインしました'); await afterLogin();
+    }));
+    $('cGoogle').addEventListener('pointerdown', preloadGoogle);
+    document.querySelector('nav button[data-tab="setting"]').addEventListener('click', preloadGoogle);
     $('cSignup').addEventListener('click', e => busy(e.target, async () => {
       const email = $('cEmail').value.trim(), pass = $('cPass').value;
       setUser(await authCall('accounts:signUp', { email, password: pass, returnSecureToken: true }), email);
@@ -2291,7 +2336,7 @@
       const link = `${location.origin}${location.pathname}?join=${code}`;
       $('cInvOut').innerHTML = `<p>招待コード：<b style="font-size:20px;letter-spacing:2px">${code}</b>（${ROLE_LABEL[role]}・7日間有効）</p><p class="muted" style="word-break:break-all">${esc(link)}</p><div class="btns"><button class="btn" id="cInvShare">📤 送る（LINE・メールなど）</button></div>`;
       $('cInvShare').onclick = () => {
-        const text = `サロンストック「${cc.salon.name}」への招待です。\n1. ${link} を開く\n2. 「設定」でメールアドレスを登録・ログイン\n3. 招待コード ${code} で参加`;
+        const text = `サロンストック「${cc.salon.name}」への招待です。\n1. ${link} を開く\n2. 「設定」でGoogleかメールアドレスでログイン\n3. 招待コード ${code} で参加`;
         if (navigator.share) navigator.share({ text }).catch(() => {}); else { navigator.clipboard && navigator.clipboard.writeText(text); toast('コピーしました'); }
       };
     }));
@@ -2339,7 +2384,7 @@
         try { user = JSON.parse(localStorage.getItem(USER_KEY)); } catch (e) { user = null; }
         const join = new URLSearchParams(location.search).get('join');
         if (join) { $('cJoinCode').value = join; $('cJoinBox').open = true; if (!user) toast('招待されています。「設定」でログインしてください'); }
-        if (!user) { fillUI(); return; }
+        if (!user) { if (join) preloadGoogle(); fillUI(); return; }
         const s = localStorage.getItem(USER_KEY + ':salon') || '';
         if (s) { salon = s; enterCloudView(); loadCC(); derive(); startLoop(); pull().then(fillUI); }
         fillUI();
