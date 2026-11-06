@@ -68,6 +68,7 @@
   .gate-steps span.done { background: color-mix(in srgb, var(--ok) 20%, var(--bg)); color: var(--ok); }
   .bulk-bar { background: var(--card); border: 2px solid var(--accent); border-radius: 12px; padding: 10px 12px; margin-top: 10px; }
   .pchk { width: 22px; height: 22px; accent-color: var(--accent); }
+  .edit-btn { padding: 2px 6px; font-size: 13px; min-height: 0; vertical-align: 1px; }
   .sup-in { margin-top: 4px; padding: 6px 8px; font-size: 14px; max-width: 220px; }
   .row > .narrow { flex: 0 0 96px; }
   button.btn { padding: 12px 14px; font-size: 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; }
@@ -160,7 +161,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.10</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.11</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -305,6 +306,7 @@
       <h2>仕入単価をまとめて入れる</h2>
       <p class="muted">納品書や請求書を見ながら、1個あたりの仕入単価（税抜）を入れてください。入れたらすぐ保存されます。在庫金額・材料費・原価率の計算に使います。店販品は販売単価も入れられます。</p>
       <p id="priceInfo" style="font-weight:bold;margin:6px 0"></p>
+      <div id="tidyBox"></div>
       <div class="row">
         <select id="priceFilter" aria-label="表示する商品"><option value="none">単価がまだだけ</option><option value="all">すべて</option></select>
         <select id="priceSup" aria-label="仕入先で絞り込む"></select>
@@ -682,6 +684,36 @@
       .replace(/送料無料|ポイント\d+倍|あす楽|即納|在庫あり|正規品|楽天ランキング\S*|★|☆|◆|■|●|※/g, ' ')
       .replace(/\s+/g, ' ').trim().slice(0, 60);
   }
+  // 品名を整える：飾りの記号を消し、同じ言葉のくり返しを1つにする（ネットの品名・手入力の両方に使う）
+  function tidyName(n) {
+    let t = cleanName(n).replace(/\u3000/g, ' ')
+      .replace(/[◎○◯▼▲△▽▶◀►◄♪♫☆★◆◇■□●◉※→←↑↓✓✔︎✨🌟⭐️]/g, ' ')
+      .replace(/^[\s!！?？・\-ー_*＊#＃]+/, '') // 先頭の「!」「・」など
+      .replace(/[!！]{1,}(?=\s|$)/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+    const seen = new Set(), out = [];
+    for (const w of t.split(' ')) { // 同じ言葉（2文字以上・数字だけでない）は1回だけ
+      const k = w.toLowerCase();
+      if (w.length >= 2 && !/^\d+$/.test(w) && seen.has(k)) continue;
+      seen.add(k); out.push(w);
+    }
+    return out.join(' ').slice(0, 60) || String(n || '').trim();
+  }
+  function renameItem(code, name) {
+    name = (name || '').trim(); if (!name) return false;
+    state.master[code] = Object.assign({ price: 0, book: null }, state.master[code], { name });
+    save(); cloudHook('item', code); shareName(code);
+    return true;
+  }
+  // ✏️ ボタン（一覧・単価の表など）：品名を直す
+  document.addEventListener('click', e => {
+    const code = e.target.dataset && e.target.dataset.editname; if (code === undefined) return;
+    const cur = (state.master[code] || {}).name || nameOf(code);
+    const v = prompt('商品名を直してください', cur.startsWith('（') ? '' : tidyName(cur));
+    if (v === null) return;
+    if (!renameItem(code, v)) { toast('商品名を入力してください'); return; }
+    toast('名前を変えました'); render();
+  });
   async function rakutenSearch(keyword) {
     const cred = rkCred();
     const qs = new URLSearchParams({ applicationId: cred.appId.trim(), keyword, hits: '10', format: 'json', formatVersion: '2' });
@@ -1059,7 +1091,7 @@
     const oc = e.target.dataset && e.target.dataset.ocr;
     if (oc !== undefined) { ocrTarget = { code: oc, row: e.target.closest('.namerow') }; $('ocrFile').click(); return; }
     const code = e.target.dataset && e.target.dataset.savename; if (code === undefined) return;
-    let name = e.target.dataset.name;
+    let name = e.target.dataset.name !== undefined ? tidyName(e.target.dataset.name) : undefined;
     if (name === undefined) { const inp = e.target.closest('.namerow') && e.target.closest('.namerow').querySelector('[data-nameinput]'); name = inp ? inp.value.trim() : ''; }
     if (!name) { toast('商品名を入力してください'); return; }
     state.master[code] = Object.assign({ price: 0, book: null }, state.master[code], { name });
@@ -1182,7 +1214,7 @@
     $('countTable').innerHTML = '<tr><th>商品</th><th>場所</th><th class="num">数量</th><th class="num">発注点</th><th></th></tr>' + codes.map(code => {
       const c = state.counts[code];
       const places = Object.entries(c.places).map(([p, q]) => `${esc(p)}:${q}`).join(' / ');
-      return `<tr><td>${catTag(code)}${esc(nameOf(code))}<br><span class="muted">${esc(code)}</span>
+      return `<tr><td>${catTag(code)}${esc(nameOf(code))} <button class="btn edit-btn" data-editname="${esc(code)}" aria-label="名前を直す">✏️</button><br><span class="muted">${esc(code)}</span>
         <input class="sup-in" list="supList2" placeholder="仕入先" value="${esc(supOfItem(code))}" data-sup="${esc(code)}" aria-label="仕入先"></td>
         <td class="muted">${places}</td>
         <td class="num"><input class="qty-input" type="number" value="${c.qty}" data-code="${esc(code)}"></td>
@@ -1201,8 +1233,28 @@
   function priceItems() { // 数えた・在庫がある・入庫した・名前がある商品
     return buildTotal().filter(t => t.counted || (t.book || 0) > 0 || (t.prev || 0) > 0 || t.inq || (state.master[t.code] || {}).name);
   }
+  function tidyTargets() {
+    return Object.entries(state.master).filter(([, m]) => m.name && tidyName(m.name) !== m.name).map(([code, m]) => ({ code, from: m.name, to: tidyName(m.name) }));
+  }
+  function renderTidy() {
+    const list = tidyTargets();
+    $('tidyBox').innerHTML = list.length ? `<details class="rename"><summary>🧹 品名の記号・くり返しをまとめて整える（${list.length} 品目）</summary>
+      <p class="muted">「◎」「▼」「!」などの記号や、同じ言葉のくり返しを消します。直したあとでも、✏️で1つずつ直せます。</p>
+      <div class="table-wrap"><table>${list.slice(0, 30).map(x => `<tr><td><span class="muted" style="text-decoration:line-through">${esc(x.from)}</span><br>→ <b>${esc(x.to)}</b></td></tr>`).join('')}</table></div>
+      ${list.length > 30 ? `<p class="muted">ほか ${list.length - 30} 品目</p>` : ''}
+      <div class="btns"><button class="btn primary" id="tidyAll">${list.length} 品目をこの名前にする</button></div></details>` : '';
+  }
+  $('tidyBox').addEventListener('click', e => {
+    if (e.target.id !== 'tidyAll') return;
+    const list = tidyTargets(); if (!list.length) return;
+    if (!confirm(`${list.length} 品目の品名を整えますか？`)) return;
+    for (const x of list) state.master[x.code].name = x.to;
+    save(); cloudHook('items', list.map(x => x.code)); list.forEach(x => shareName(x.code));
+    toast(`${list.length} 品目の品名を整えました`); render();
+  });
   function renderPrices() {
     if (!canMoney()) return;
+    renderTidy();
     setTimeout(bulkInfo, 0);
     const items = priceItems(), sup = supplierOf();
     const noPrice = items.filter(t => !t.price).length;
@@ -1219,7 +1271,7 @@
       : !rows.length ? `<tr><td class="muted">${f === 'none' && !noPrice ? '単価がまだの商品はありません 🎉' : '当てはまる商品がありません。'}</td></tr>`
       : '<tr><th></th><th>商品</th><th class="num">仕入単価</th><th class="num">販売単価</th></tr>' + rows.map(t => `<tr>
         <td><input type="checkbox" class="pchk" data-psel="${esc(t.code)}" ${selPrice.has(t.code) ? 'checked' : ''} aria-label="選ぶ"></td>
-        <td>${t.cat ? `<span class="cat-tag">${esc(t.cat)}</span>` : ''}${esc(t.name)}<br><span class="muted">${esc(t.code)}　${esc(sup[t.code] || '仕入先なし')}　在庫 ${t.counted ? t.qty : Math.max(0, t.book ?? 0)}</span></td>
+        <td>${t.cat ? `<span class="cat-tag">${esc(t.cat)}</span>` : ''}${esc(t.name)} <button class="btn edit-btn" data-editname="${esc(t.code)}" aria-label="名前を直す">✏️</button><br><span class="muted">${esc(t.code)}　${esc(sup[t.code] || '仕入先なし')}　在庫 ${t.counted ? t.qty : Math.max(0, t.book ?? 0)}</span></td>
         <td class="num"><input class="qty-input" style="width:90px" type="number" inputmode="numeric" min="0" placeholder="円" value="${t.price || ''}" data-pprice="${esc(t.code)}" aria-label="仕入単価"></td>
         <td class="num">${t.cat === RETAIL || t.sell != null ? `<input class="qty-input" style="width:90px" type="number" inputmode="numeric" min="0" placeholder="円" value="${t.sell ?? ''}" data-psell="${esc(t.code)}" aria-label="販売単価">` : '<span class="muted">-</span>'}</td></tr>`).join('');
   }
