@@ -150,7 +150,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.4</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.5</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -312,7 +312,7 @@
     </div>
     <div class="card">
       <h2>Excelに書き出す・共有する</h2>
-      <p class="muted">「仕入・出庫管理」と「在庫管理」の2つのシートが入ったExcelファイルを作ります。今期（前回の確定から今日まで）の入庫・材料使用・店販の出庫と、仕入先ごとの在庫が入ります。</p>
+      <p class="muted">「仕入・出庫管理」「在庫管理」「月ごとの材料費」のシートが入ったExcelファイルを作ります。今期（前回の確定から今日まで）の入庫・材料使用・店販の出庫と、仕入先ごとの在庫、月ごとの材料費・原価率（最大24か月）が入ります。</p>
       <div class="btns">
         <button id="xlsxShare" class="btn primary">📤 共有（LINE・メールなど）</button>
         <button id="xlsxSave" class="btn">💾 ファイルに保存</button>
@@ -493,7 +493,7 @@
   // ---------- 保存データ ----------
   // counts: { code: { qty, places: {place: qty}, updated } }
   let state = { staff: '', place: '', counts: {}, master: {}, history: [], lookup: {}, opt: { auto: false, lookup: true, share: true }, rk: { appId: '', accessKey: '' },
-    receipts: [], suppliers: {}, outs: [], oDraft: { date: '', type: 'sale', customer: '', lines: [] }, draft: { date: '', supplier: '', slip: '', lines: [], photo: '' }, closes: [], sales: '' };
+    receipts: [], suppliers: {}, outs: [], oDraft: { date: '', type: 'sale', customer: '', lines: [] }, draft: { date: '', supplier: '', slip: '', lines: [], photo: '' }, closes: [], sales: '', monthSales: {} };
   let merged = []; // [{file, rows:[{code,name,qty,staff,place}]}]
 
   function load() {
@@ -1619,17 +1619,26 @@
     });
     return m;
   }
-  function renderMonthly() {
-    const data = monthlyData(), keys = Object.keys(data).sort();
-    const now = today().slice(0, 7);
-    if (!keys.length) { $('monthly').innerHTML = '<p class="muted">まだ記録がありません。出庫で「材料の使用」を記録するか、入庫を入れると、ここに月ごとに並びます。</p>'; return; }
-    const months = []; // 最初の月から今月まで（最大12か月）
+  // 最初の月から今月まで（新しい方から最大 n か月）。古い順で返す
+  function monthRows(n) {
+    const data = monthlyData(), ms = state.monthSales || {};
+    const keys = [...Object.keys(data), ...Object.keys(ms).filter(k => Number(ms[k]) > 0)].sort();
+    if (!keys.length) return [];
+    const now = today().slice(0, 7), months = [];
     for (let [y, mo] = keys[0].split('-').map(Number); ; mo++) {
       if (mo > 12) { mo = 1; y++; }
       const k = `${y}-${String(mo).padStart(2, '0')}`; months.push(k);
       if (k >= now && k >= keys[keys.length - 1]) break;
     }
-    const list = months.slice(-12).map(k => { const d = data[k] || { use: 0, diff: 0, buy: 0, sale: 0 }; return { k, ...d, total: d.use + d.diff }; });
+    return months.slice(-n).map(k => {
+      const d = data[k] || { use: 0, diff: 0, buy: 0, sale: 0 }, total = d.use + d.diff, tech = Number(ms[k]) || 0;
+      return { k, ...d, total, tech, rate: tech ? total / tech * 100 : null };
+    });
+  }
+  const pct = (v) => v == null ? '-' : v.toFixed(1) + '%';
+  function renderMonthly() {
+    const now = today().slice(0, 7), list = monthRows(12);
+    if (!list.length) { $('monthly').innerHTML = '<p class="muted">まだ記録がありません。出庫で「材料の使用」を記録するか、入庫を入れると、ここに月ごとに並びます。</p>'; return; }
     const done = list.filter(x => x.k < now && x.total > 0);
     const hi = done.length > 1 ? done.reduce((a, b) => b.total > a.total ? b : a) : null;
     const lo = done.length > 1 ? done.reduce((a, b) => b.total < a.total ? b : a) : null;
@@ -1642,14 +1651,27 @@
       return `<div class="mrow"><div class="mlab">${lab(x.k)}${x.k === now ? '<small>今月（途中）</small>' : ''}</div>
         <div class="mbar"><i class="u" style="width:${w(x.use)}%"></i><i class="d" style="width:${w(x.diff)}%"></i></div>
         <div class="mval"><span><b>${yen(x.total)}</b> ${x === hi ? '<span class="mtag hi">いちばん多い</span>' : x === lo ? '<span class="mtag lo">いちばん少ない</span>' : ''}</span>
-        <span class="muted">${diffPrev == null ? '' : '前の月より ' + (diffPrev >= 0 ? '+' : '−') + yen(Math.abs(diffPrev))}</span></div></div>`;
+        <span class="muted">${x.rate != null ? `原価率 <b style="font-size:14px;color:var(--text)">${pct(x.rate)}</b>　` : ''}${diffPrev == null ? '' : '前の月より ' + (diffPrev >= 0 ? '+' : '−') + yen(Math.abs(diffPrev))}</span></div></div>`;
     }).join('');
     $('monthly').innerHTML = `<div class="mlegend"><span><i style="background:var(--accent)"></i>記録した使用</span><span><i style="background:color-mix(in srgb, var(--accent) 45%, var(--bg))"></i>棚卸の差</span></div>`
       + (avg ? `<p class="muted" style="margin:0 0 4px">終わった月の平均：<b>${yen(avg)}</b>／月</p>` : '') + rows
-      + `<details class="rename"><summary>くわしく（表で見る）</summary><div class="table-wrap"><table><tr><th>月</th><th class="num">材料費</th><th class="num">うち記録</th><th class="num">うち棚卸の差</th><th class="num">仕入額</th><th class="num">店販売上</th></tr>`
-      + list.slice().reverse().map(x => `<tr><td style="white-space:nowrap">${Number(x.k.slice(5))}月${x.k === now ? '<br><span class="muted">途中</span>' : ''}</td><td class="num">${yen(x.total)}</td><td class="num">${yen(x.use)}</td><td class="num${x.diff < 0 ? ' minus' : ''}">${yen(x.diff)}</td><td class="num">${yen(x.buy)}</td><td class="num">${yen(x.sale)}</td></tr>`).join('')
-      + '</table></div><p class="muted">仕入額は納品日の月、店販売上（税抜）は販売した日の月で集計しています。</p></details>';
+      + `<details class="rename"><summary>くわしく（表で見る）</summary><div class="table-wrap"><table><tr><th>月</th><th class="num">材料費</th><th class="num">うち記録</th><th class="num">うち棚卸の差</th><th class="num">仕入額</th><th class="num">店販売上</th><th class="num">技術売上</th><th class="num">原価率</th></tr>`
+      + list.slice().reverse().map(x => `<tr><td style="white-space:nowrap">${Number(x.k.slice(5))}月${x.k === now ? '<br><span class="muted">途中</span>' : ''}</td><td class="num">${yen(x.total)}</td><td class="num">${yen(x.use)}</td><td class="num${x.diff < 0 ? ' minus' : ''}">${yen(x.diff)}</td><td class="num">${yen(x.buy)}</td><td class="num">${yen(x.sale)}</td><td class="num">${x.tech ? yen(x.tech) : '-'}</td><td class="num">${pct(x.rate)}</td></tr>`).join('')
+      + '</table></div><p class="muted">仕入額は納品日の月、店販売上（税抜）は販売した日の月で集計しています。原価率＝材料費÷技術売上。</p></details>'
+      + `<details class="rename" id="msBox"${state._msOpen ? ' open' : ''}><summary>月ごとの技術売上を入れる（原価率を出すとき）</summary>
+        <p class="muted">レジや売上表の「技術売上（税抜）」を月ごとに入れると、その月の原価率が出ます。</p>
+        <div class="table-wrap"><table>${list.slice().reverse().map(x => `<tr><td style="white-space:nowrap">${lab(x.k)}${x.k === now ? '<br><span class="muted">途中</span>' : ''}</td>
+        <td><input type="number" inputmode="numeric" placeholder="円" data-ms="${x.k}" value="${x.tech || ''}"></td><td class="num" style="white-space:nowrap">${pct(x.rate)}</td></tr>`).join('')}</table></div></details>`;
   }
+  // 月ごとの技術売上（入力のたびに保存。表示の更新は入力を終えたとき）
+  $('monthly').addEventListener('input', e => {
+    const k = e.target.dataset && e.target.dataset.ms; if (!k) return;
+    state.monthSales = state.monthSales || {};
+    const v = Number(e.target.value) || 0; if (v > 0) state.monthSales[k] = v; else delete state.monthSales[k];
+    save(); cloudHook('settings');
+  });
+  $('monthly').addEventListener('change', e => { if (e.target.dataset && e.target.dataset.ms) { state._msOpen = true; renderMonthly(); } });
+  $('monthly').addEventListener('toggle', e => { if (e.target.id === 'msBox') state._msOpen = e.target.open; }, true);
   $('sales').addEventListener('input', e => { state.sales = e.target.value; save(); cloudHook('settings'); renderCost(buildTotal()); });
 
   $('closeBtn').addEventListener('click', () => {
@@ -1945,7 +1967,34 @@
         for (const i of [4, 5]) { ws2.getCell(r, c0 + i).numFmt = XL.qty; ws2.getCell(r, c0 + i).alignment = { horizontal: 'right' }; }
       }
     });
-    return { wb, count: rows.length, sups: stock.length };
+    // ---------- 月ごとの材料費（お金を見られる人だけ） ----------
+    const mrows = canMoney() ? monthRows(24) : [];
+    if (mrows.length) {
+      const ws3 = wb.addWorksheet('月ごとの材料費', { views: [{ state: 'frozen', ySplit: 1 }] });
+      const mcols = ['月', '材料費', 'うち記録した使用', 'うち棚卸の差', '仕入額', '店販売上（税抜）', '技術売上', '原価率'];
+      const nowK = today().slice(0, 7);
+      ws3.addTable({ name: '月ごとの材料費', ref: 'A1', headerRow: true, totalsRow: false, style: { theme: 'TableStyleMedium2', showRowStripes: true },
+        columns: mcols.map(n => ({ name: n, filterButton: false })),
+        rows: mrows.map(x => [`${Number(x.k.slice(0, 4))}年${Number(x.k.slice(5))}月${x.k === nowK ? '（途中）' : ''}`, Math.round(x.total), Math.round(x.use), Math.round(x.diff), Math.round(x.buy), Math.round(x.sale), x.tech || null, null]) });
+      const last = mrows.length + 1;
+      for (let r = 2; r <= last; r++) {
+        const rc = ws3.getCell(r, 8); rc.value = { formula: `IF(G${r}>0,B${r}/G${r},"")`, result: mrows[r - 2].rate == null ? '' : mrows[r - 2].rate / 100 }; rc.numFmt = '0.0%';
+        for (let n = 2; n <= 7; n++) { ws3.getCell(r, n).numFmt = XL.yen; }
+        for (const n of [2, 3, 4]) ws3.getCell(r, n).fill = fillOf(XL.mat);
+        ws3.getCell(r, 5).fill = fillOf(XL.buy); ws3.getCell(r, 6).fill = fillOf(XL.sale);
+        for (let n = 1; n <= 8; n++) ws3.getCell(r, n).font = n === 2 ? { ...XL.font, bold: true } : XL.font;
+      }
+      const tr = last + 1; // 合計の行
+      ws3.getCell(tr, 1).value = '合計'; ws3.getCell(tr, 1).font = { ...XL.font, bold: true };
+      for (let n = 2; n <= 7; n++) { const col = String.fromCharCode(64 + n), c = ws3.getCell(tr, n); c.value = { formula: `SUM(${col}2:${col}${last})` }; c.numFmt = XL.yen; c.font = { ...XL.font, bold: true }; }
+      const t8 = ws3.getCell(tr, 8); t8.value = { formula: `IF(G${tr}>0,B${tr}/G${tr},"")` }; t8.numFmt = '0.0%'; t8.font = { ...XL.font, bold: true };
+      ws3.getCell(tr + 2, 1).value = '材料費＝記録した使用（出庫の日付の月）＋棚卸の差（確定した日の月）。原価率＝材料費÷技術売上。';
+      ws3.getCell(tr + 2, 1).font = { ...XL.font, color: { argb: 'FF666666' } };
+      for (let n = 1; n <= 8; n++) { const h = ws3.getCell(1, n); h.font = { ...XL.font, bold: true, color: { argb: 'FFFFFFFF' } }; h.fill = fillOf('FF4472C4'); h.alignment = { horizontal: 'center' }; }
+      [16, 13, 15, 13, 13, 15, 13, 9].forEach((w, i) => { ws3.getColumn(i + 1).width = w; });
+      ws3.pageSetup = { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+    }
+    return { wb, count: rows.length, sups: stock.length, months: mrows.length };
   }
   async function loadExcelJS() {
     if (window.ExcelJS) return;
@@ -1954,10 +2003,10 @@
   }
   async function makeXlsx() {
     await loadExcelJS();
-    const { wb, count, sups } = await buildWorkbook();
+    const { wb, count, sups, months } = await buildWorkbook();
     const buf = await wb.xlsx.writeBuffer();
     const name = `サロンストック_${today().replace(/-/g, '')}.xlsx`;
-    $('xlsxInfo').textContent = `仕入・出庫管理 ${count} 行、在庫管理 ${sups} 社分を作りました。`;
+    $('xlsxInfo').textContent = `仕入・出庫管理 ${count} 行、在庫管理 ${sups} 社分${months ? `、月ごとの材料費 ${months} か月分` : ''}を作りました。`;
     return new File([buf], name, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   }
   function saveFile(file) {
@@ -2226,8 +2275,9 @@
       settings() {
         clearTimeout(hooks._st);
         hooks._st = setTimeout(() => {
-          cc.settings.main = { suppliers: state.suppliers || {}, sales: String(state.sales || ''), at: Date.now() };
-          enqueue([{ path: `salons/${salon}/settings/main`, data: { suppliers: state.suppliers || {}, sales: String(state.sales || '') } }]);
+          const data = { suppliers: state.suppliers || {}, sales: String(state.sales || ''), monthSales: state.monthSales || {} };
+          cc.settings.main = { ...data, at: Date.now() };
+          enqueue([{ path: `salons/${salon}/settings/main`, data }]);
         }, 800);
       },
     };
@@ -2266,7 +2316,7 @@
       });
       state.outs = evs.filter(e => e.kind === 'out').map(e => ({ id: e.id, date: e.date, type: e.type, customer: e.customer || '', lines: (e.lines || []).map(l => ({ code: l.c, qty: l.q, sell: l.s ?? '' })), created: e.ts }));
       const st = cc.settings.main || {};
-      if (money()) { state.suppliers = st.suppliers || {}; state.sales = st.sales || ''; }
+      if (money()) { state.suppliers = st.suppliers || {}; state.sales = st.sales || ''; state.monthSales = st.monthSales || {}; }
       save();
       document.body.classList.toggle('record-only', !money());
       $('salonChip').style.display = ''; $('salonChip').textContent = cc.salon.name || '';
