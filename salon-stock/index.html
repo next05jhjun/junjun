@@ -79,7 +79,13 @@
   .filter input { width: auto; }
   .hit { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.55); display: none; align-items: flex-end; justify-content: center; }
   .hit.show { display: flex; }
-  .hit-box { background: var(--card); width: 100%; max-width: 720px; border-radius: 16px 16px 0 0; padding: 0 16px 20px; border-top: 10px solid #22b14c; animation: pop .25s ease-out; }
+  .hit-box { background: var(--card); width: 100%; max-width: 720px; border-radius: 16px 16px 0 0; border-top: 10px solid #22b14c; animation: pop .25s ease-out;
+    display: flex; flex-direction: column; max-height: calc(100% - 16px); }
+  /* 品名・候補の部分だけスクロール。数と「次を読む」はいつも下に見える */
+  .hit-scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 0 16px 8px; flex: 1 1 auto; min-height: 0; }
+  .hit-foot { flex: 0 0 auto; border-top: 1px solid var(--line); padding: 6px 16px calc(14px + env(safe-area-inset-bottom)); background: var(--card); }
+  .hit-foot .btns { margin-top: 6px; }
+  .hit-foot .hit-count { font-size: 40px; }
   @keyframes pop { from { transform: translateY(40px); opacity: .3; } to { transform: none; opacity: 1; } }
   .hit-ok { text-align: center; font-size: 22px; font-weight: bold; color: #22b14c; padding: 10px 0 4px; }
   .hit-count { text-align: center; font-size: 56px; font-weight: bold; line-height: 1.1; }
@@ -114,7 +120,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 3.2</small><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 3.3</small><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -318,15 +324,19 @@
 <div class="flash" id="flash"></div>
 <div class="hit" id="hit">
   <div class="hit-box">
-    <div class="hit-ok">✓ 読み取りました</div>
-    <div id="hitInfo"></div>
-    <div class="hit-count"><span id="hitCount"></span><small> 個</small></div>
-    <div class="btns">
-      <button class="btn" id="hitMinus">−1</button>
-      <button class="btn" id="hitPlus">+1</button>
+    <div class="hit-scroll" id="hitScroll">
+      <div class="hit-ok">✓ 読み取りました</div>
+      <div id="hitInfo"></div>
     </div>
-    <div class="btns">
-      <button class="btn primary" id="hitNext">次を読む</button>
+    <div class="hit-foot">
+      <div class="hit-count"><span id="hitCount"></span><small> 個</small></div>
+      <div class="btns">
+        <button class="btn" id="hitMinus">−1</button>
+        <button class="btn" id="hitPlus">+1</button>
+      </div>
+      <div class="btns">
+        <button class="btn primary" id="hitNext">次を読む</button>
+      </div>
     </div>
   </div>
 </div>
@@ -455,7 +465,11 @@
   const rkCred = () => (state.rk && state.rk.appId) ? state.rk : (RK_DEFAULT.appId.startsWith('__') ? { appId: '' } : RK_DEFAULT);
   const rkReady = () => !!rkCred().appId;
   function cleanName(n) {
-    return String(n || '')
+    n = String(n || '');
+    // 「品名|検索用の言葉の羅列」の形なら、後ろを省く
+    const cut = n.split(/[|｜]/)[0];
+    if (cut.trim().length >= 8) n = cut;
+    return n
       .replace(/【[^】]*】|［[^］]*］|\[[^\]]*\]|＜[^＞]*＞|<[^>]*>|≪[^≫]*≫/g, ' ')
       .replace(/送料無料|ポイント\d+倍|あす楽|即納|在庫あり|正規品|楽天ランキング\S*|★|☆|◆|■|●|※/g, ' ')
       .replace(/\s+/g, ' ').trim().slice(0, 60);
@@ -862,11 +876,14 @@
       ${line ? `<label>単価（円）</label><input type="number" inputmode="numeric" data-rprice="${esc(code)}" value="${esc(line.price)}" placeholder="納品書の単価">` : ''}
       <div id="hitMore"></div>`;
     renderInfo($('hitMore'), code);
+    if (!$('hit').classList.contains('show')) $('hitScroll').scrollTop = 0;
     $('hit').classList.add('show');
+    document.body.style.overflow = 'hidden';
   }
   function closeHit() {
     clearTimeout(autoTimer);
     $('hit').classList.remove('show');
+    document.body.style.overflow = '';
     hitCode = null;
     if (scanner) { try { scanner.resume(); } catch (e) {} }
   }
@@ -928,7 +945,7 @@
     }
   }
   async function stopCamera() {
-    $('hit').classList.remove('show'); hitCode = null; clearTimeout(autoTimer);
+    $('hit').classList.remove('show'); document.body.style.overflow = ''; hitCode = null; clearTimeout(autoTimer);
     if (!scanner) return;
     try { await scanner.stop(); scanner.clear(); } catch (e) {}
     scanner = null;
