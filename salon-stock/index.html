@@ -157,7 +157,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.7</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.8</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -1296,7 +1296,9 @@
   document.querySelectorAll('input[name=flt]').forEach(r => r.addEventListener('change', renderTotal));
   $('totalCat').addEventListener('change', renderTotal);
 
-  function buildTotal() {
+  // final＝確定するとき：数えていない商品は0個（全部使った）として計算する。
+  // ふだん（final でない）は、数えていない商品の差はまだわからないので、記録した使用だけを材料費に入れる
+  function buildTotal(final = false) {
     const map = {};
     const get = (code) => map[code] || (map[code] = { code, name: '', qty: 0, counted: false });
     const lc = lastClose(), inQ = periodIn(), oq = periodOutQty();
@@ -1312,15 +1314,15 @@
       const sold = oq.sale[t.code] || 0, use = oq.use[t.code] || 0; // 記録した出庫（販売・材料使用）
       // 帳簿（あるはずの数）＝ 前回の在庫＋入庫−出庫。確定前は商品マスタの帳簿数＋入庫−出庫
       const book = lc ? prev + inq - sold - use : (m.book != null ? m.book + inq - sold - use : null);
-      const diff = book === null || !t.counted ? (book === null ? null : 0 - book) : t.qty - book; // マイナス＝記録外の減り
+      const diff = book === null ? null : t.counted ? t.qty - book : final ? 0 - book : null; // マイナス＝記録外の減り
       const cat = m.cat || t.cat0 || '';
       const lost = diff !== null && diff < 0 ? -diff : 0;
       // 材料として使った数：記録した材料使用＋（店販品以外は）記録外の減り
       const matQty = use + (cat === RETAIL ? 0 : lost);
-      const used = book === null ? (use || null) : matQty; // 表示用「使った」
+      const used = book === null || diff === null ? (use || null) : matQty; // 表示用「使った」
       return { ...t, cat, name: m.name || (state.lookup[t.code] && state.lookup[t.code].name) || t.name || '（マスタに無い商品）', price, prev, inq, sold, use, book, diff, used, min: m.min ?? null,
         sell: m.sell ?? null, lostRetail: cat === RETAIL ? lost : 0,
-        amount: t.qty * price, diffAmount: diff === null ? null : diff * price, usedAmount: matQty * price };
+        amount: (t.counted || final ? t.qty : Math.max(0, book ?? 0)) * price, /* 数えていない商品は帳簿の数で見込む */ diffAmount: diff === null ? null : diff * price, usedAmount: matQty * price };
     }).sort((a, b) => Math.abs(b.diffAmount || 0) - Math.abs(a.diffAmount || 0) || a.code.localeCompare(b.code));
   }
 
@@ -1340,12 +1342,14 @@
     const amount = all.reduce((s, t) => s + t.amount, 0);
     const usedAmount = all.reduce((s, t) => s + (t.usedAmount || 0), 0);
     const over = all.filter(t => t.diff > 0).length;
-    const uncounted = all.filter(t => !t.counted).length;
-    $('summary').innerHTML = `
-      <div>在庫金額<b>${yen(amount)}</b></div>
-      <div>材料費<b>${yen(usedAmount)}</b></div>
+    const uncounted = all.filter(t => !t.counted).length, counted = all.length - uncounted;
+    const lc = lastClose();
+    $('summary').innerHTML = (lc && !counted ? `<div style="grid-column:1/-1" class="edit-bar">📅 <b>${esc(lc.date || '前回')}に棚卸を確定し、新しい期間が始まりました。</b><br>
+        <span class="muted">今は「数えた結果」が空なので、下の数字は「前回の在庫＋入庫−出庫（帳簿）」をもとにした見込みです。次の棚卸（月末など）で全部数えてから、もう一度確定してください。</span></div>` : '') + `
+      <div>在庫金額<b>${yen(amount)}</b><span class="muted">${uncounted ? '数えていない商品は帳簿の数で見込み' : '数えた数×仕入単価'}</span></div>
+      <div>材料費<b>${yen(usedAmount)}</b><span class="muted">${uncounted ? '記録した使用＋数えた商品の差' : '記録した使用＋棚卸の差'}</span></div>
       <div>帳簿より多い品目<b class="${over ? 'plus' : ''}">${over}</b><span class="muted">入庫の入れ忘れかも</span></div>
-      <div>未カウント<b>${uncounted}</b></div>`;
+      <div>まだ数えていない<b>${uncounted}</b><span class="muted">品目（数えた：${counted}）</span></div>`;
     renderCost(everything);
     const flt = document.querySelector('input[name=flt]:checked').value;
     const rows = all.filter(t => flt === 'all' || (flt === 'diff' ? t.diff : !t.counted));
@@ -1743,7 +1747,7 @@
     setMin(c, -1); renderMinNeed(needsMin(buildTotal()));
   });
   $('closeBtn').addEventListener('click', () => {
-    const all = buildTotal();
+    const all = buildTotal(true);
     if (!all.some(t => t.counted)) { toast('まだ数えていません'); return; }
     const miss = needsMin(all);
     if (miss.length) { renderMinNeed(miss); $('minNeed').scrollIntoView({ behavior: 'smooth', block: 'start' }); toast(`発注点が入っていない商品が ${miss.length} 品目あります`); return; }
