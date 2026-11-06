@@ -106,6 +106,13 @@
   .namerow button { flex: 0 0 auto; padding: 10px 12px; }
   details.rename { margin-top: 8px; }
   details.rename summary { color: var(--accent); font-size: 14px; cursor: pointer; }
+  .start-msg { background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+  details.start .s-first { display: none; }
+  #cloudIn.nosalon details.start { border: 2px solid var(--accent); border-radius: 12px; padding: 10px 12px; margin-top: 12px; }
+  #cloudIn.nosalon details.start summary { font-size: 16px; font-weight: bold; }
+  #cloudIn.nosalon details.start .s-first { display: inline; }
+  #cloudIn.nosalon details.start p.s-first { display: block; }
+  #cloudIn.nosalon details.start .s-more { display: none; }
   .crop { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.7); display: none; align-items: center; justify-content: center; padding: 16px; }
   .crop.show { display: flex; }
   .crop-box { background: var(--card); border-radius: 12px; padding: 16px; width: 100%; max-width: 720px; }
@@ -122,7 +129,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.1</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.2</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -333,19 +340,30 @@
       </div>
       <div id="cloudIn" style="display:none">
         <p class="muted">ログイン中：<b id="cWho"></b>　<a href="#" id="cLogout">ログアウト</a></p>
+        <div id="cHasSalon">
         <label for="cSalon">お店</label>
         <select id="cSalon"></select>
         <p class="muted" id="cRole"></p>
         <p class="muted" id="cSync"></p>
-        <div class="btns">
+        </div>
+        <div id="cStartMsg" class="start-msg" style="display:none">
+          <b>はじめに、どちらかを選んでください</b>
+          <div class="muted">お店のオーナーは「お店を作る」、スタッフは招待コードで「参加」します。</div>
+        </div>
+        <div class="btns" id="cSyncBtns">
           <button id="cSyncNow" class="btn">🔄 今すぐ同期</button>
           <button id="cMigrate" class="btn" style="display:none">📲 このスマホのデータをクラウドへ移す</button>
         </div>
-        <details class="rename"><summary>お店を新しく作る</summary>
-          <div class="namerow"><input id="cNewName" placeholder="例：〇〇美容室 本店"><button id="cCreate" class="btn primary">作る</button></div>
+        <details class="rename start" id="cCreateBox"><summary><span class="s-first">🏠 オーナーの方：お店を作る</span><span class="s-more">＋ 別のお店を作る（2店舗目など）</span></summary>
+          <label for="cNewName">お店の名前</label>
+          <input id="cNewName" placeholder="例：〇〇美容室 本店">
+          <div class="btns"><button id="cCreate" class="btn primary">このお店を作る</button></div>
+          <p class="muted s-first">作ったあと、スタッフを招待できます。お店の名前はあとから変えられません。</p>
         </details>
-        <details class="rename" id="cJoinBox"><summary>招待コードでお店に参加する</summary>
-          <div class="namerow"><input id="cJoinCode" placeholder="例：K7M2P9QX" autocapitalize="characters"><button id="cJoin" class="btn primary">参加</button></div>
+        <details class="rename start" id="cJoinBox"><summary><span class="s-first">👤 スタッフの方：招待コードで参加する</span><span class="s-more">招待コードで別のお店に参加する</span></summary>
+          <label for="cJoinCode">招待コード（オーナーから届いた8文字）</label>
+          <input id="cJoinCode" placeholder="例：K7M2P9QX" autocapitalize="characters">
+          <div class="btns"><button id="cJoin" class="btn primary">参加する</button></div>
         </details>
         <div id="cOwner" style="display:none">
           <details class="rename"><summary>スタッフを招待する</summary>
@@ -2273,6 +2291,10 @@
       const list = await mySalons().catch(() => ({}));
       $('cSalon').innerHTML = '<option value="">（クラウドを使わない：このスマホだけ）</option>' + Object.entries(list).map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join('');
       $('cSalon').value = salon in list || !salon ? salon : '';
+      const none = !Object.keys(list).length && !salon; // まだお店が無い：作る／参加するを大きく出す
+      $('cloudIn').classList.toggle('nosalon', none);
+      $('cHasSalon').style.display = $('cSyncBtns').style.display = none ? 'none' : '';
+      $('cStartMsg').style.display = none ? '' : 'none';
       const role = cc ? cc.role : '';
       $('cRole').textContent = salon ? `あなたの権限：${ROLE_LABEL[role] || '確認中'}` : 'お店を選ぶか、新しく作ってください。';
       $('cOwner').style.display = role === 'owner' ? '' : 'none';
@@ -2323,13 +2345,13 @@
     $('cSyncNow').addEventListener('click', e => busy(e.target, async () => { await flush().catch(() => {}); await pull(); fillUI(); toast('同期しました'); }));
     $('cCreate').addEventListener('click', e => busy(e.target, async () => {
       const name = $('cNewName').value.trim(); if (!name) throw new Error('お店の名前を入れてください');
-      const id = await createSalon(name); $('cNewName').value = '';
+      const id = await createSalon(name); $('cNewName').value = ''; $('cCreateBox').open = false;
       toast(`「${name}」を作りました`); await chooseSalon(id, name);
     }));
     $('cJoin').addEventListener('click', e => busy(e.target, async () => {
       const code = $('cJoinCode').value.trim().toUpperCase(); if (!code) throw new Error('招待コードを入れてください');
       const id = await joinSalon(code); if (!id) return;
-      $('cJoinCode').value = ''; toast('参加しました'); await chooseSalon(id);
+      $('cJoinCode').value = ''; $('cJoinBox').open = false; toast('参加しました'); await chooseSalon(id);
     }));
     $('cInvite').addEventListener('click', e => busy(e.target, async () => {
       const role = $('cInvRole').value, code = await invite(role);
