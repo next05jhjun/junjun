@@ -120,7 +120,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 3.5</small><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 3.6</small><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -1636,10 +1636,19 @@
     for (const r of state.receipts.slice().sort((a, b) => a.created - b.created)) for (const l of r.lines) sup[l.code] = r.supplier || '仕入先なし';
     return sup;
   }
-  function buildWorkbook() {
-    const XLSX = window.XLSX, lc = lastClose(), all = buildTotal(), recs = periodReceipts();
+  // 参考の管理表と同じ見た目（テーブル・色分け・¥表示）で作る（ExcelJS）
+  const XL = {
+    font: { name: 'ＭＳ Ｐゴシック', size: 11 },
+    yen: '"¥"#,##0_);[Red]\\("¥"#,##0\\)',
+    qty: '0_);[Red]\\(0\\)',
+    // 参考ファイルの色（テーマ色の明るい版）：仕入＝黄、材料費＝青、販売＝オレンジ
+    buy: 'FFFFF2CC', mat: 'FFD9E1F2', sale: 'FFFCE4D6',
+  };
+  const fillOf = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+  const codeVal = (c) => (/^[1-9]\d{0,14}$/.test(String(c)) ? Number(c) : String(c)); // バーコードは数字として（先頭0は文字のまま）
+  function buildRows() {
+    const lc = lastClose(), all = buildTotal(), recs = periodReceipts();
     const nm = (c) => nameOf(c), num = (v) => (v === '' || v == null ? null : Number(v));
-    // --- 仕入・出庫管理（1行1件）
     const rows = [];
     for (const r of recs.slice().sort((a, b) => a.date.localeCompare(b.date))) for (const l of r.lines) {
       const pr = num(l.price);
@@ -1665,43 +1674,77 @@
       rows.push([usedDate, t.code, t.name, null, pr, null, extra, pr == null ? null : pr * extra, null, null, null, null, null, '（棚卸の差から）', null]);
     }
     rows.sort((a, b) => a[0] - b[0]);
-    const sum = (i) => rows.reduce((s, r) => s + (Number(r[i]) || 0), 0);
-    const sheet1 = [
-      [null, null, null, '仕入', sum(5), null, '材料費', sum(7), null, '商品販売', sum(12)],
-      [lc ? `期間：${lc.date} の確定より後〜${today()}` : `期間：〜${today()}（まだ確定なし）`],
-      ['日付', 'コード', '商品名', '入庫数', '仕入単価', '仕入金額', '材料使用数', '材料費', '出庫数', '商品単価', '商品金額', '消費税', '販売金額', 'お客様名', '仕入先'],
-      ...rows,
-    ];
-    const ws1 = XLSX.utils.aoa_to_sheet(sheet1, { cellDates: true });
-    ws1['!cols'] = [12, 15, 40, 7, 9, 10, 9, 10, 7, 9, 10, 8, 10, 14, 14].map(w => ({ wch: w }));
-    for (let r = 3; r < sheet1.length; r++) { const c = ws1[XLSX.utils.encode_cell({ r, c: 0 })]; if (c) c.z = 'yyyy/m/d'; }
-    // --- 在庫管理（仕入先ごとの表を横に並べる）
+    // 在庫管理：仕入先ごと
     const sup = supplierOf(), groups = {};
     for (const t of all) { const g = sup[t.code] || '仕入先なし'; (groups[g] = groups[g] || []).push(t); }
     const names = Object.keys(groups).sort((a, b) => (a === '仕入先なし') - (b === '仕入先なし') || groups[b].length - groups[a].length);
-    const grid = [];
-    names.forEach((g, gi) => {
-      const col = gi * 7;
-      const put = (r, c, v) => { (grid[r] = grid[r] || [])[col + c] = v; };
-      ['コード', g, '仕入金額', '販売金額', '月始在庫数', '月末在庫数'].forEach((h, i) => put(0, i, h));
-      groups[g].sort((a, b) => a.name.localeCompare(b.name, 'ja')).forEach((t, i) => {
-        const m = state.master[t.code] || {};
-        put(i + 1, 0, t.code); put(i + 1, 1, t.name); put(i + 1, 2, t.price || null); put(i + 1, 3, num(m.sell));
-        put(i + 1, 4, t.prev ?? null); put(i + 1, 5, t.counted ? t.qty : null);
-      });
+    const stock = names.map(g => ({ name: g, rows: groups[g].sort((a, b) => a.name.localeCompare(b.name, 'ja')).map(t => [t.code, t.name, t.price || null, num((state.master[t.code] || {}).sell), t.prev ?? null, t.counted ? t.qty : null]) }));
+    return { lc, rows, stock };
+  }
+  async function buildWorkbook() {
+    const { lc, rows, stock } = buildRows();
+    const wb = new window.ExcelJS.Workbook();
+    wb.creator = 'サロンストック';
+    // ---------- 仕入・出庫管理 ----------
+    const ws = wb.addWorksheet('仕入・出庫管理', { views: [{ state: 'frozen', ySplit: 3 }] });
+    const sum = (i) => rows.reduce((s, r) => s + (Number(r[i]) || 0), 0);
+    const head = (addr, text, argb) => { const c = ws.getCell(addr); c.value = text; c.fill = fillOf(argb); c.font = { ...XL.font, bold: true }; c.alignment = { horizontal: 'center' }; };
+    const total = (addr, col, val) => { const c = ws.getCell(addr); c.value = rows.length ? { formula: `SUM(出庫管理[${col}])`, result: val } : 0; c.numFmt = XL.yen; c.font = { ...XL.font, bold: true }; };
+    head('D1', '仕入', XL.buy); total('E1', '仕入金額', sum(5));
+    head('G1', '材料費', XL.mat); total('H1', '材料費', sum(7));
+    head('J1', '商品販売', XL.sale); total('K1', '販売金額', sum(12));
+    ws.getCell('A2').value = lc ? `期間：${lc.date} の確定より後〜${today()}` : `期間：〜${today()}（まだ確定なし）`;
+    ws.getCell('A2').font = { ...XL.font, color: { argb: 'FF666666' } };
+    const cols = ['日付', 'コード', '商品名', '入庫数', '仕入単価', '仕入金額', '材料使用数', '材料費', '出庫数', '商品単価', '商品金額', '消費税', '販売金額', 'お客様名', '仕入先'];
+    const body = rows.length ? rows.map(r => { const x = r.slice(); x[1] = codeVal(x[1]); return x; }) : [cols.map(() => null)];
+    ws.addTable({ name: '出庫管理', ref: 'A3', headerRow: true, totalsRow: false,
+      style: { theme: 'TableStyleMedium3', showRowStripes: true }, columns: cols.map(n => ({ name: n, filterButton: true })), rows: body });
+    [12, 18, 46, 8, 11, 11, 11, 11, 8, 11, 11, 9, 11, 16, 16].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+    ws.pageSetup = { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: '3:3' };
+    for (let r = 4; r < 4 + body.length; r++) {
+      const row = ws.getRow(r);
+      row.eachCell({ includeEmpty: true }, (c, n) => { if (n <= cols.length) c.font = XL.font; });
+      row.getCell(1).numFmt = 'yyyy/m/d';
+      row.getCell(2).numFmt = '0'; row.getCell(2).alignment = { horizontal: 'right' };
+      for (const n of [4, 7, 9]) row.getCell(n).numFmt = XL.qty;
+      for (const n of [5, 6, 8, 10, 11, 12, 13]) { row.getCell(n).numFmt = XL.yen; row.getCell(n).alignment = { horizontal: 'right' }; }
+      for (const n of [5, 6]) row.getCell(n).fill = fillOf(XL.buy);
+      for (const n of [7, 8]) row.getCell(n).fill = fillOf(XL.mat);
+      for (const n of [10, 11, 12, 13]) row.getCell(n).fill = fillOf(XL.sale);
+      for (const n of [6, 8, 13]) row.getCell(n).font = { ...XL.font, bold: true };
+    }
+    // 見出し行：テーブルの色（オレンジ・白文字）をセルにも付けて、Excel以外のアプリでも同じに見えるように
+    for (let n = 1; n <= cols.length; n++) { const c = ws.getCell(3, n); c.font = { ...XL.font, bold: true, color: { argb: 'FFFFFFFF' } }; c.fill = fillOf('FFED7D31'); c.alignment = { horizontal: 'center' }; }
+    // ---------- 在庫管理（仕入先ごとのテーブルを横に並べる） ----------
+    const ws2 = wb.addWorksheet('在庫管理', { views: [{ state: 'frozen', ySplit: 1 }] });
+    if (!stock.length) ws2.getCell('A1').value = 'データがありません';
+    ws2.pageSetup = { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+    stock.forEach((g, gi) => {
+      const c0 = gi * 7 + 1;
+      const rowsG = g.rows.length ? g.rows.map(r => { const x = r.slice(); x[0] = codeVal(x[0]); return x; }) : [[null, null, null, null, null, null]];
+      ws2.addTable({ name: `在庫${gi + 1}`, ref: ws2.getCell(1, c0).address, headerRow: true, totalsRow: false,
+        style: { theme: 'TableStyleMedium2', showRowStripes: true },
+        columns: ['コード', g.name, '仕入金額', '販売金額', '月始在庫数', '月末在庫数'].map(n => ({ name: n, filterButton: true })), rows: rowsG });
+      [18, 46, 11, 11, 11, 11, 2].forEach((w, i) => { ws2.getColumn(c0 + i).width = w; });
+      for (let i = 0; i < 6; i++) { const h = ws2.getCell(1, c0 + i); h.font = { ...XL.font, bold: true, color: { argb: 'FFFFFFFF' } }; h.fill = fillOf('FF4472C4'); h.alignment = { horizontal: 'center' }; }
+      for (let r = 2; r < 2 + rowsG.length; r++) {
+        for (let i = 0; i < 6; i++) ws2.getCell(r, c0 + i).font = XL.font;
+        ws2.getCell(r, c0).numFmt = '0'; ws2.getCell(r, c0).alignment = { horizontal: 'right' };
+        for (const i of [2, 3]) { ws2.getCell(r, c0 + i).numFmt = XL.yen; ws2.getCell(r, c0 + i).alignment = { horizontal: 'right' }; }
+        for (const i of [4, 5]) { ws2.getCell(r, c0 + i).numFmt = XL.qty; ws2.getCell(r, c0 + i).alignment = { horizontal: 'right' }; }
+      }
     });
-    for (let r = 0; r < grid.length; r++) grid[r] = grid[r] || [];
-    const ws2 = XLSX.utils.aoa_to_sheet(grid.length ? grid : [['データがありません']]);
-    ws2['!cols'] = names.flatMap(() => [15, 36, 9, 9, 9, 9, 3]).map(w => ({ wch: w }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws1, '仕入・出庫管理');
-    XLSX.utils.book_append_sheet(wb, ws2, '在庫管理');
-    return { wb, count: rows.length, sups: names.length };
+    return { wb, count: rows.length, sups: stock.length };
+  }
+  async function loadExcelJS() {
+    if (window.ExcelJS) return;
+    try { await loadScript('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'); }
+    catch (e) { await loadScript('https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js'); }
   }
   async function makeXlsx() {
-    if (!window.XLSX) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
-    const { wb, count, sups } = buildWorkbook();
-    const buf = window.XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellDates: true });
+    await loadExcelJS();
+    const { wb, count, sups } = await buildWorkbook();
+    const buf = await wb.xlsx.writeBuffer();
     const name = `サロンストック_${today().replace(/-/g, '')}.xlsx`;
     $('xlsxInfo').textContent = `仕入・出庫管理 ${count} 行、在庫管理 ${sups} 社分を作りました。`;
     return new File([buf], name, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
