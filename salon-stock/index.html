@@ -59,6 +59,7 @@
   .sup-chips button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
   .warn-line { color: var(--bad); font-weight: bold; }
   .edit-bar { scroll-margin-top: 140px; background: var(--hl); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+  .sup-in { margin-top: 4px; padding: 6px 8px; font-size: 14px; max-width: 220px; }
   .row > .narrow { flex: 0 0 96px; }
   button.btn { padding: 12px 14px; font-size: 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; }
   button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: bold; }
@@ -150,7 +151,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.5</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.6</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -284,7 +285,7 @@
       <h2>数えた結果</h2>
       <p class="muted" id="listInfo"></p>
       <select id="listCat" aria-label="種類で絞り込む" style="margin-bottom:8px"></select>
-      <div class="table-wrap"><table id="countTable"></table></div>
+      <div class="table-wrap"><table id="countTable"></table></div><datalist id="supList2"></datalist>
       <div class="btns">
         <button id="exportBtn" class="btn primary">Excel用に書き出す（CSV）</button>
         <button id="clearBtn" class="btn danger">全部消す</button>
@@ -538,6 +539,31 @@
     setCat(code, c);
     e.target.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.setcat === catOf(code)));
   });
+  // ---------- 商品の仕入先 ----------
+  const supOfItem = (code) => (state.master[code] && state.master[code].sup) || '';
+  const allSups = () => uniq([...state.receipts.slice().reverse().map(r => r.supplier), ...Object.values(state.master).map(m => m.sup)].filter(Boolean));
+  function setSup(code, sup) {
+    const m = state.master[code] || (state.master[code] = { name: '', price: 0, book: null });
+    m.sup = (sup || '').trim(); save(); cloudHook('item', code);
+  }
+  function supButtons(code) {
+    const cur = supOfItem(code), list = uniq([cur, ...allSups()].filter(Boolean)).slice(0, 12);
+    return `<div class="muted" style="margin-top:10px">仕入先${cur ? '' : '（タップで選ぶ）'}</div><div class="cats" data-supbox="${esc(code)}">` +
+      list.map(x => `<button type="button" data-setsup="${esc(x)}" data-supcode="${esc(code)}" class="${x === cur ? 'on' : ''}">${esc(x)}</button>`).join('') +
+      `<button type="button" data-supnew="${esc(code)}">＋ 新しい仕入先</button></div>`;
+  }
+  document.addEventListener('click', e => {
+    const d = e.target.dataset || {};
+    if (d.setsup !== undefined) {
+      const code = d.supcode; setSup(code, supOfItem(code) === d.setsup ? '' : d.setsup); // 同じものをもう一度押すと解除
+      e.target.parentElement.querySelectorAll('[data-setsup]').forEach(b => b.classList.toggle('on', b.dataset.setsup === supOfItem(code)));
+      toast(supOfItem(code) ? `仕入先：${supOfItem(code)}` : '仕入先を外しました');
+    } else if (d.supnew !== undefined) {
+      const v = (prompt('仕入先の名前（例：〇〇商事）') || '').trim(); if (!v) return;
+      setSup(d.supnew, v); e.target.parentElement.outerHTML = supButtons(d.supnew).replace(/^<div class="muted"[^>]*>.*?<\/div>/, '');
+      toast(`仕入先：${v}`); renderList();
+    }
+  });
   function fillCatSelect(sel) {
     const v = sel.value;
     sel.innerHTML = '<option value="">すべての種類</option>' + CATS.map(c => `<option>${esc(c)}</option>`).join('') + '<option value="-">種類なし</option>';
@@ -586,7 +612,7 @@
     const c = state.counts[code];
     $('last').style.display = 'block';
     $('lastName').textContent = nameOf(code);
-    $('lastCode').textContent = code + (qty && qty !== 1 ? `（+${qty}）` : '');
+    $('lastCode').textContent = code + (qty && qty !== 1 ? `（${qty > 0 ? '+' : '−'}${Math.abs(qty)}）` : '');
     $('lastCount').textContent = c ? c.qty : 0;
     renderInfo($('lastInfo'), code);
   }
@@ -796,7 +822,7 @@
     } else {
       html += `<details class="rename"><summary>名前を変える</summary>${nameRow(code, known)}</details>`;
     }
-    el.innerHTML = html + catButtons(code) + links(code);
+    el.innerHTML = html + catButtons(code) + (el.id === 'lastInfo' || scanMode === 'count' ? supButtons(code) : '') + links(code);
   }
   const RK_CREDIT = '<p class="muted" style="font-size:12px;margin:4px 0 0"><a href="https://webservice.rakuten.co.jp/" target="_blank" rel="noopener">Supported by Rakuten Developers</a></p>';
   const chips = (list) => '<div class="links">' + list.map(x => `<a href="#" data-fill="${esc(x)}">${esc(x)}</a>`).join('') + '</div>';
@@ -1111,12 +1137,15 @@
     const f = $('listCat').value;
     const codes = Object.keys(state.counts).filter(c => catMatch(c, f)).sort((a, b) => (state.counts[b].updated || 0) - (state.counts[a].updated || 0));
     const total = codes.reduce((s, c) => s + state.counts[c].qty, 0);
-    $('listInfo').textContent = `${codes.length} 品目 / 合計 ${total} 個`;
+    const noSup = codes.filter(c => !supOfItem(c)).length;
+    $('listInfo').textContent = `${codes.length} 品目 / 合計 ${total} 個` + (noSup ? `（仕入先なし ${noSup} 品目）` : '');
+    $('supList2').innerHTML = allSups().map(x => `<option value="${esc(x)}">`).join('');
     if (!codes.length) { $('countTable').innerHTML = '<tr><td class="muted">まだ数えていません。「数える」から始めてください。</td></tr>'; return; }
     $('countTable').innerHTML = '<tr><th>商品</th><th>場所</th><th class="num">数量</th><th class="num">発注点</th><th></th></tr>' + codes.map(code => {
       const c = state.counts[code];
       const places = Object.entries(c.places).map(([p, q]) => `${esc(p)}:${q}`).join(' / ');
-      return `<tr><td>${catTag(code)}${esc(nameOf(code))}<br><span class="muted">${esc(code)}</span></td>
+      return `<tr><td>${catTag(code)}${esc(nameOf(code))}<br><span class="muted">${esc(code)}</span>
+        <input class="sup-in" list="supList2" placeholder="仕入先" value="${esc(supOfItem(code))}" data-sup="${esc(code)}" aria-label="仕入先"></td>
         <td class="muted">${places}</td>
         <td class="num"><input class="qty-input" type="number" value="${c.qty}" data-code="${esc(code)}"></td>
         <td class="num"><input class="qty-input" type="number" min="0" placeholder="-" value="${esc(state.master[code] && state.master[code].min != null ? state.master[code].min : '')}" data-min="${esc(code)}" aria-label="発注点"></td>
@@ -1125,6 +1154,8 @@
   }
   $('listCat').addEventListener('change', renderList);
   $('countTable').addEventListener('change', e => {
+    const sc = e.target.dataset.sup;
+    if (sc !== undefined) { setSup(sc, e.target.value); toast(supOfItem(sc) ? `仕入先：${supOfItem(sc)}` : '仕入先を外しました'); setTimeout(renderList, 0); return; }
     const mc = e.target.dataset.min;
     if (mc !== undefined) {
       const m = state.master[mc] || (state.master[mc] = { name: '', price: 0, book: null });
@@ -1496,9 +1527,12 @@
       cloudHook('recvDel', old.id);
     }
     // 単価を覚える（在庫金額・材料費の計算に使う）
-    for (const l of r.lines) if (l.price !== '' && l.price > 0) {
+    for (const l of r.lines) {
       const m = state.master[l.code] || (state.master[l.code] = { name: '', price: 0, book: null });
-      m.price = l.price; cloudHook('item', l.code);
+      let ch = false;
+      if (l.price !== '' && l.price > 0) { m.price = l.price; ch = true; }
+      if (!m.sup && r.supplier) { m.sup = r.supplier; ch = true; } // 商品の仕入先が未設定なら、この納品書の仕入先にする
+      if (ch) cloudHook('item', l.code);
     }
     state.receipts.push(r);
     if (r.photo) { state.photoOf = state.photoOf || {}; state.photoOf[r.id] = r.photo; }
@@ -1867,6 +1901,7 @@
   function supplierOf() {
     const sup = {};
     for (const r of state.receipts.slice().sort((a, b) => a.created - b.created)) for (const l of r.lines) sup[l.code] = r.supplier || '仕入先なし';
+    for (const [code, m] of Object.entries(state.master)) if (m.sup) sup[code] = m.sup; // 商品に設定した仕入先を優先
     return sup;
   }
   // 参考の管理表と同じ見た目（テーブル・色分け・¥表示）で作る（ExcelJS）
@@ -2230,7 +2265,7 @@
         const w = [];
         for (const code of codes) {
           const m = state.master[code]; if (!m) continue;
-          const it = { name: m.name || '', cat: m.cat || '', sell: m.sell ?? null, min: m.min ?? null, book: m.book ?? null };
+          const it = { name: m.name || '', cat: m.cat || '', sup: m.sup || '', sell: m.sell ?? null, min: m.min ?? null, book: m.book ?? null };
           cc.items[code] = { ...it, at: Date.now() };
           w.push({ path: `salons/${salon}/items/${code}`, data: it });
           if (money() && m.price) { cc.costs[code] = { price: m.price, at: Date.now() }; w.push({ path: `salons/${salon}/costs/${code}`, data: { price: m.price } }); }
@@ -2286,7 +2321,7 @@
     function derive() {
       if (!cc) return;
       const master = {};
-      for (const [code, it] of Object.entries(cc.items)) master[code] = { name: it.name || '', cat: it.cat || '', sell: it.sell ?? null, min: it.min ?? null, book: it.book ?? null, price: 0 };
+      for (const [code, it] of Object.entries(cc.items)) master[code] = { name: it.name || '', cat: it.cat || '', sup: it.sup || '', sell: it.sell ?? null, min: it.min ?? null, book: it.book ?? null, price: 0 };
       for (const [code, c] of Object.entries(cc.costs)) (master[code] = master[code] || { name: '', cat: '', price: 0, book: null }).price = c.price || 0;
       state.master = master;
       const lcAt = Number(cc.salon.lastCloseAt) || 0;
