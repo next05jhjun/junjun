@@ -115,12 +115,14 @@
   .crop-wrap { width: fit-content; margin: 0 auto; }
   .crop .btns button { flex: 1; }
   .crop button:disabled { opacity: .45; }
+  body.record-only .money, body.record-only nav button[data-tab="total"] { display: none !important; }
+  .salon-chip { font-size: 12px; font-weight: normal; color: var(--accent); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ocr-status { font-size: 14px; color: var(--muted); margin-top: 4px; min-height: 1em; }
 </style>
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 3.6</small><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.0</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -195,7 +197,7 @@
         <button id="rClear" class="btn danger">やり直す</button>
       </div>
     </div>
-    <div class="card">
+    <div class="card money">
       <h2>仕入先ごとの請求の見込み</h2>
       <p class="muted">仕入先ごとに締日を選ぶと、納品日をもとに次回の請求金額の見込みを出します。届いた請求書との照らし合わせにも使えます。</p>
       <div id="billing"></div>
@@ -312,7 +314,50 @@
 
   <!-- 設定 -->
   <section id="tab-setting">
-    <div class="card">
+    <div class="card" id="cloudCard">
+      <h2>☁️ お店のクラウド</h2>
+      <div id="cloudOut">
+        <p class="muted">ログインすると、データをお店ごとのクラウドに保存し、オーナーとスタッフで共有できます。スマホをなくしても消えません。ログインしなければ、今までどおりこのスマホの中だけで使えます。</p>
+        <label for="cEmail">メールアドレス</label>
+        <input id="cEmail" type="email" autocomplete="username" inputmode="email">
+        <label for="cPass">パスワード（6文字以上）</label>
+        <input id="cPass" type="password" autocomplete="current-password">
+        <div class="btns">
+          <button id="cLogin" class="btn primary">ログイン</button>
+          <button id="cSignup" class="btn">新しく登録</button>
+          <button id="cReset" class="btn">パスワードを忘れた</button>
+        </div>
+      </div>
+      <div id="cloudIn" style="display:none">
+        <p class="muted">ログイン中：<b id="cWho"></b>　<a href="#" id="cLogout">ログアウト</a></p>
+        <label for="cSalon">お店</label>
+        <select id="cSalon"></select>
+        <p class="muted" id="cRole"></p>
+        <p class="muted" id="cSync"></p>
+        <div class="btns">
+          <button id="cSyncNow" class="btn">🔄 今すぐ同期</button>
+          <button id="cMigrate" class="btn" style="display:none">📲 このスマホのデータをクラウドへ移す</button>
+        </div>
+        <details class="rename"><summary>お店を新しく作る</summary>
+          <div class="namerow"><input id="cNewName" placeholder="例：〇〇美容室 本店"><button id="cCreate" class="btn primary">作る</button></div>
+        </details>
+        <details class="rename" id="cJoinBox"><summary>招待コードでお店に参加する</summary>
+          <div class="namerow"><input id="cJoinCode" placeholder="例：K7M2P9QX" autocapitalize="characters"><button id="cJoin" class="btn primary">参加</button></div>
+        </details>
+        <div id="cOwner" style="display:none">
+          <details class="rename"><summary>スタッフを招待する</summary>
+            <label for="cInvRole">権限</label>
+            <select id="cInvRole"><option value="record">記録だけ（数える・入庫・出庫。お金は見えない）</option><option value="full">全部（オーナーと同じ。メンバー管理以外）</option></select>
+            <div class="btns"><button id="cInvite" class="btn primary">招待コードを作る</button></div>
+            <div id="cInvOut"></div>
+          </details>
+          <details class="rename" id="cMembersBox"><summary>メンバーと権限</summary><div id="cMembers"></div></details>
+        </div>
+        <div class="btns"><button id="cLeave" class="btn danger" style="display:none">このお店から抜ける</button></div>
+      </div>
+      <p class="muted" id="cMsg" style="color:var(--bad)"></p>
+    </div>
+    <div class="card money">
       <h2>商品マスタ（帳簿）を読み込む</h2>
       <p class="muted">ExcelでCSV保存したファイルを選びます。列の順番：<b>バーコード, 商品名, 単価, 帳簿数, 種類</b>（1行目は見出し）。単価・帳簿数・種類は空でもOK。種類は「カラー剤」「パーマ剤」など。読み込んでも、スキャン中に登録した品名は消えません。</p>
       <input type="file" id="masterFile" accept=".csv,text/csv">
@@ -428,7 +473,7 @@
   function setCat(code, cat) {
     const m = state.master[code] || (state.master[code] = { name: '', price: 0, book: null });
     m.cat = m.cat === cat ? '' : cat; // 同じものをもう一度押すと解除
-    save();
+    save(); cloudHook('item', code);
     if (m.name) shareName(code);
   }
   function catButtons(code) {
@@ -474,6 +519,7 @@
     c.places[place] = (c.places[place] || 0) + qty;
     c.updated = Date.now();
     state.history.push({ code, qty, place });
+    cloudHook('count', code, qty, place);
     if (state.history.length > 200) state.history.shift();
     save();
     beep();
@@ -903,7 +949,7 @@
     if (!name) { toast('商品名を入力してください'); return; }
     state.master[code] = Object.assign({ price: 0, book: null }, state.master[code], { name });
     const sc = e.target.dataset.cat; if (sc && !state.master[code].cat) state.master[code].cat = sc;
-    save(); toast('登録しました：' + name);
+    save(); cloudHook('item', code); toast('登録しました：' + name);
     shareName(code);
     $('lastName').textContent = name;
     if ($('hit').classList.contains('show')) showHit(code);
@@ -923,7 +969,7 @@
     const line = scanMode === 'recv' && state.draft.lines.find(l => l.code === code);
     $('hitInfo').innerHTML = `<div id="hitName" style="text-align:center;font-weight:bold;font-size:18px">${esc(nameOf(code))}</div>
       <div class="muted" style="text-align:center">${esc(code)}</div>
-      ${line ? `<div class="row"><div><label>仕入単価（円）</label><input type="number" inputmode="numeric" data-rprice="${esc(code)}" value="${esc(line.price)}" placeholder="納品書の単価"></div>
+      ${line && canMoney() ? `<div class="row"><div><label>仕入単価（円）</label><input type="number" inputmode="numeric" data-rprice="${esc(code)}" value="${esc(line.price)}" placeholder="納品書の単価"></div>
         <div><label>販売単価（円・任意）</label><input type="number" inputmode="numeric" data-sell="${esc(code)}" value="${esc((state.master[code] || {}).sell ?? '')}" placeholder="店販の売価"></div></div>` : ''}
       ${oline ? `<label>販売単価（円・税抜）</label><input type="number" inputmode="numeric" data-osell="${esc(code)}" value="${esc(oline.sell)}" placeholder="売価">` : ''}
       <div id="hitMore"></div>`;
@@ -958,6 +1004,7 @@
   $('undoBtn').addEventListener('click', () => {
     const h = state.history.pop();
     if (!h) return;
+    cloudHook('count', h.code, -h.qty, h.place);
     const c = state.counts[h.code];
     if (c) {
       c.qty -= h.qty;
@@ -1031,7 +1078,7 @@
     if (mc !== undefined) {
       const m = state.master[mc] || (state.master[mc] = { name: '', price: 0, book: null });
       m.min = e.target.value === '' ? null : Number(e.target.value);
-      save(); toast(m.min === null ? '発注点を外しました' : `発注点を ${m.min} にしました`); return;
+      save(); cloudHook('item', mc); toast(m.min === null ? '発注点を外しました' : `発注点を ${m.min} にしました`); return;
     }
     const code = e.target.dataset.code; if (code === undefined) return;
     const c = state.counts[code]; const v = Number(e.target.value);
@@ -1039,16 +1086,20 @@
     // 手で直した分は「手修正」として場所ごとの内訳を調整
     const diff = v - c.qty;
     c.qty = v; c.places['手修正'] = (c.places['手修正'] || 0) + diff;
+    if (diff) cloudHook('count', code, diff, '手修正');
     if (!c.places['手修正']) delete c.places['手修正'];
     c.updated = Date.now(); save(); renderList();
   });
   $('countTable').addEventListener('click', e => {
     const code = e.target.dataset.del; if (code === undefined) return;
-    if (confirm(`「${nameOf(code)}」を消しますか？`)) { delete state.counts[code]; save(); renderList(); }
+    if (confirm(`「${nameOf(code)}」を消しますか？`)) {
+      for (const [pl, q] of Object.entries(state.counts[code].places)) if (q) cloudHook('count', code, -q, pl);
+      delete state.counts[code]; save(); renderList();
+    }
   });
   $('clearBtn').addEventListener('click', () => {
     if (!Object.keys(state.counts).length) return;
-    if (confirm('数えた結果を全部消します。先にCSVを書き出しましたか？')) { state.counts = {}; state.history = []; save(); renderList(); }
+    if (confirm('数えた結果を全部消します。先にCSVを書き出しましたか？')) { state.counts = {}; state.history = []; save(); cloudHook('reset'); renderList(); }
   });
 
   // ---------- CSV ----------
@@ -1122,7 +1173,7 @@
       };
       n++;
     }
-    save(); renderMasterInfo();
+    save(); renderMasterInfo(); cloudHook('items', Object.keys(state.master));
     toast(`${n} 商品を読み込みました`);
     e.target.value = '';
   });
@@ -1292,15 +1343,16 @@
       $('rTable').innerHTML = '<tr><td class="muted">まだ商品がありません。届いた商品のバーコードを読んでください。</td></tr>';
       $('rTotal').textContent = '';
     } else {
-      $('rTable').innerHTML = '<tr><th>商品</th><th class="num">数</th><th class="num">単価</th><th class="num">金額</th><th></th></tr>' + d.lines.map(l => `
+      const mny = canMoney();
+      $('rTable').innerHTML = `<tr><th>商品</th><th class="num">数</th>${mny ? '<th class="num">単価</th><th class="num">金額</th>' : ''}<th></th></tr>` + d.lines.map(l => `
         <tr><td>${catTag(l.code)}${esc(nameOf(l.code))}<br><span class="muted">${esc(l.code)}</span></td>
         <td class="num"><input class="qty-input" style="width:56px" type="number" value="${esc(l.qty)}" data-rq="${esc(l.code)}"></td>
-        <td class="num"><input class="qty-input" type="number" inputmode="numeric" placeholder="円" value="${esc(l.price)}" data-rprice="${esc(l.code)}"></td>
-        <td class="num">${l.price === '' ? '-' : yen(lineAmount(l))}</td>
+        ${mny ? `<td class="num"><input class="qty-input" type="number" inputmode="numeric" placeholder="円" value="${esc(l.price)}" data-rprice="${esc(l.code)}"></td>
+        <td class="num">${l.price === '' ? '-' : yen(lineAmount(l))}</td>` : ''}
         <td><button class="btn danger" data-rdel="${esc(l.code)}" aria-label="削除">✕</button></td></tr>`).join('');
       const qty = d.lines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
       const noPrice = d.lines.filter(l => l.price === '' || l.price == null).length;
-      $('rTotal').textContent = `${d.lines.length} 品目 / ${qty} 個 / 合計 ${yen(slipAmount(d))}` + (noPrice ? `（単価なし ${noPrice} 品目）` : '');
+      $('rTotal').textContent = `${d.lines.length} 品目 / ${qty} 個` + (mny ? ` / 合計 ${yen(slipAmount(d))}` + (noPrice ? `（単価なし ${noPrice} 品目）` : '') : '');
     }
     renderRecvHistory();
     renderBilling();
@@ -1352,16 +1404,18 @@
   $('rSave').addEventListener('click', () => {
     const d = state.draft;
     if (!d.lines.length) { toast('商品がありません'); return; }
-    const noPrice = d.lines.filter(l => l.price === '' || l.price == null).length;
+    const noPrice = canMoney() ? d.lines.filter(l => l.price === '' || l.price == null).length : 0;
     if (noPrice && !confirm(`単価が入っていない商品が ${noPrice} 品目あります。このまま保存しますか？（材料費の計算では0円になります）`)) return;
     const r = { id: Date.now().toString(36), date: d.date || today(), supplier: (d.supplier || '').trim(), slip: (d.slip || '').trim(),
       lines: d.lines.map(l => ({ code: l.code, qty: Number(l.qty) || 0, price: l.price === '' ? '' : Number(l.price) })), photo: d.photo || '', created: Date.now() };
     // 単価を覚える（在庫金額・材料費の計算に使う）
     for (const l of r.lines) if (l.price !== '' && l.price > 0) {
       const m = state.master[l.code] || (state.master[l.code] = { name: '', price: 0, book: null });
-      m.price = l.price;
+      m.price = l.price; cloudHook('item', l.code);
     }
     state.receipts.push(r);
+    if (r.photo) { state.photoOf = state.photoOf || {}; state.photoOf[r.id] = r.photo; }
+    cloudHook('recv', r);
     state.draft = { date: today(), supplier: '', slip: '', lines: [], photo: '' };
     save(); $('rPhotoPrev').innerHTML = '';
     renderRecv();
@@ -1373,8 +1427,8 @@
     if (!list.length) { $('rHistory').innerHTML = '<p class="muted">まだありません。</p>'; return; }
     const lc = lastClose();
     $('rHistory').innerHTML = list.map(r => `
-      <details class="rename" data-rid="${esc(r.id)}"><summary>${esc(md(r.date))}　${esc(r.supplier || '（仕入先なし）')}　${r.lines.length}品目　${yen(slipAmount(r))}${lc && r.created <= lc.at ? '　<span class="muted">確定済み</span>' : ''}</summary>
-        <div class="table-wrap"><table>${r.lines.map(l => `<tr><td>${esc(nameOf(l.code))}</td><td class="num">${l.qty}</td><td class="num">${l.price === '' ? '-' : yen(l.price)}</td><td class="num">${yen(lineAmount(l))}</td></tr>`).join('')}</table></div>
+      <details class="rename" data-rid="${esc(r.id)}"><summary>${esc(md(r.date))}　${esc(r.supplier || '（仕入先なし）')}　${r.lines.length}品目${canMoney() ? '　' + yen(slipAmount(r)) : ''}${lc && r.created <= lc.at ? '　<span class="muted">確定済み</span>' : ''}</summary>
+        <div class="table-wrap"><table>${r.lines.map(l => `<tr><td>${esc(nameOf(l.code))}</td><td class="num">${l.qty}</td>${canMoney() ? `<td class="num">${l.price === '' ? '-' : yen(l.price)}</td><td class="num">${yen(lineAmount(l))}</td>` : ''}</tr>`).join('')}</table></div>
         ${r.slip ? `<p class="muted">伝票番号：${esc(r.slip)}</p>` : ''}
         <div class="rphoto"></div>
         <div class="btns"><button class="btn danger" data-rcdel="${esc(r.id)}">この入庫を削除</button></div>
@@ -1390,7 +1444,7 @@
     const r = state.receipts.find(x => x.id === id); if (!r) return;
     if (!confirm(`${md(r.date)} ${r.supplier || ''} の入庫（${yen(slipAmount(r))}）を削除しますか？`)) return;
     if (r.photo) idb.del(r.photo).catch(() => {});
-    state.receipts = state.receipts.filter(x => x.id !== id); save(); renderRecv();
+    state.receipts = state.receipts.filter(x => x.id !== id); save(); cloudHook('recvDel', id); renderRecv();
   });
   $('rExport').addEventListener('click', () => {
     const rows = [['納品日', '仕入先', '伝票番号', 'バーコード', '商品名', '種類', '数量', '単価', '金額']];
@@ -1444,7 +1498,7 @@
       : '<p class="muted">棚卸を確定すると、ここに期間ごとの材料費が並びます。</p>';
     const u = $('undoClose'); if (u) u.onclick = undoClose;
   }
-  $('sales').addEventListener('input', e => { state.sales = e.target.value; save(); renderCost(buildTotal()); });
+  $('sales').addEventListener('input', e => { state.sales = e.target.value; save(); cloudHook('settings'); renderCost(buildTotal()); });
 
   $('closeBtn').addEventListener('click', () => {
     const all = buildTotal();
@@ -1456,9 +1510,11 @@
     const sales = Number(state.sales) || 0;
     const counts = {}, prices = {};
     for (const t of all) { counts[t.code] = t.counted ? t.qty : 0; prices[t.code] = t.price; }
-    state.closes.push({ date: today(), at: Date.now(), counts, prices,
+    const closeObj = { id: 'c' + Date.now().toString(36), date: today(), at: Date.now(), counts, prices,
       saved: JSON.parse(JSON.stringify(state.counts)), // 取り消し用
-      summary: { first: false, material, retail, lost, buy: periodReceipts().reduce((s, r) => s + slipAmount(r), 0), sales, rate: lc && sales ? +(material / sales * 100).toFixed(1) : null } });
+      summary: { first: false, material, retail, lost, buy: periodReceipts().reduce((s, r) => s + slipAmount(r), 0), sales, rate: sales ? +(material / sales * 100).toFixed(1) : null } };
+    state.closes.push(closeObj);
+    cloudHook('close', closeObj);
     state.counts = {}; state.history = []; state.sales = ''; merged = [];
     save(); render(); toast('棚卸を確定しました');
   });
@@ -1468,6 +1524,7 @@
     if (!confirm(`${c.date} の確定を取り消しますか？`)) return;
     state.closes.pop();
     state.counts = c.saved || {}; state.sales = c.summary.sales || '';
+    cloudHook('undoClose', c, lastClose());
     save(); render(); toast('確定を取り消しました');
   }
 
@@ -1506,7 +1563,7 @@
   $('billing').addEventListener('change', e => {
     const sup = e.target.dataset.closefor; if (sup === undefined) return;
     state.suppliers[sup] = Object.assign({}, state.suppliers[sup], { close: e.target.value });
-    save(); renderBilling();
+    save(); cloudHook('settings'); renderBilling();
   });
 
   // ========== 出庫（店販の販売・材料としての使用） ==========
@@ -1553,7 +1610,7 @@
     const line = state.oDraft.lines.find(l => l.code === (sc ?? qc)); if (!line) return;
     if (sc !== undefined) {
       line.sell = t.value === '' ? '' : Number(t.value);
-      if (line.sell !== '') { const m = state.master[line.code] || (state.master[line.code] = { name: '', price: 0, book: null }); m.sell = line.sell; } // 売価を覚える
+      if (line.sell !== '') { const m = state.master[line.code] || (state.master[line.code] = { name: '', price: 0, book: null }); m.sell = line.sell; cloudHook('item', line.code); } // 売価を覚える
     } else { line.qty = Number(t.value) || 0; if (line.qty <= 0) state.oDraft.lines = state.oDraft.lines.filter(l => l !== line); }
     save(); renderOut();
   });
@@ -1584,7 +1641,7 @@
       if (sale) {
         const amt = outAmount(d), tax = Math.round(amt * TAX);
         $('oTotal').textContent = `${qty} 個 / ${yen(amt)} ＋ 消費税 ${yen(tax)} ＝ ${yen(amt + tax)}`;
-      } else $('oTotal').textContent = `${d.lines.length} 品目 / ${qty} 個（材料費 ${yen(d.lines.reduce((s, l) => s + l.qty * ((state.master[l.code] || {}).price || 0), 0))}）`;
+      } else $('oTotal').textContent = `${d.lines.length} 品目 / ${qty} 個` + (canMoney() ? `（材料費 ${yen(d.lines.reduce((s, l) => s + l.qty * ((state.master[l.code] || {}).price || 0), 0))}）` : '');
     }
     renderOutHistory();
   }
@@ -1594,6 +1651,7 @@
     const o = { id: 'o' + Date.now().toString(36), date: d.date || today(), type: d.type === 'use' ? 'use' : 'sale', customer: d.type === 'use' ? '' : (d.customer || '').trim(),
       lines: d.lines.map(l => ({ code: l.code, qty: Number(l.qty) || 0, sell: l.sell === '' ? '' : Number(l.sell) })), created: Date.now() };
     state.outs.push(o);
+    cloudHook('out', o);
     state.oDraft = { date: today(), type: o.type, customer: '', lines: [] };
     save(); renderOut();
     toast(o.type === 'sale' ? `販売を記録しました（${yen(outAmount(o))}＋税）` : '材料の使用を記録しました');
@@ -1617,14 +1675,14 @@
     const id = e.target.dataset.ocdel; if (id === undefined) return;
     const o = state.outs.find(x => x.id === id); if (!o) return;
     if (!confirm(`${md(o.date)} の出庫を削除しますか？`)) return;
-    state.outs = state.outs.filter(x => x.id !== id); save(); renderOut();
+    state.outs = state.outs.filter(x => x.id !== id); save(); cloudHook('outDel', id); renderOut();
   });
 
   // ========== 販売単価（店販の売価） ==========
   document.addEventListener('change', e => {
     const c = e.target.dataset && e.target.dataset.sell; if (c === undefined) return;
     const m = state.master[c] || (state.master[c] = { name: '', price: 0, book: null });
-    m.sell = e.target.value === '' ? null : Number(e.target.value); save();
+    m.sell = e.target.value === '' ? null : Number(e.target.value); save(); cloudHook('item', c);
   });
 
   // ========== Excel（仕入・出庫管理／在庫管理）==========
@@ -1764,9 +1822,535 @@
       catch (e) { if (e.name !== 'AbortError') saveFile(file); }
     } else { saveFile(file); toast('共有に対応していないため、ファイルとして保存しました'); }
   });
+  // ==================== お店のクラウド（Firebase：メールログイン＋Firestore） ====================
+  // データの置き場所：salons/{お店}/… （ルールは firestore.rules）
+  // ・各記録（数えた・入庫・出庫）は追記型の「events」。at＝サーバー時刻（同期用）、ts＝記録した時刻（期間の判定用）
+  // ・仕入値（costs・recvPrices）と確定（closes）・設定（settings）は owner / full だけが読める
+  function cloudHook(kind, ...a) { if (Cloud.on) { try { Cloud.hook(kind, ...a); } catch (e) { console.error(e); } } }
+  function canMoney() { return !Cloud.on || Cloud.money(); }
+  const Cloud = (() => {
+    const EMU = /^(localhost|127\.)/.test(location.hostname) && new URLSearchParams(location.search).has('emu'); // テスト用（エミュレーター）
+    const C = EMU
+      ? { key: 'demo-key', pid: 'demo-salon', id: 'http://127.0.0.1:9099/identitytoolkit.googleapis.com', st: 'http://127.0.0.1:9099/securetoken.googleapis.com', fs: 'http://127.0.0.1:8080' }
+      : { key: FB.apiKey, pid: FB.projectId, id: 'https://identitytoolkit.googleapis.com', st: 'https://securetoken.googleapis.com', fs: 'https://firestore.googleapis.com' };
+    const ROOT = `projects/${C.pid}/databases/(default)/documents`;
+    const BASE = `${C.fs}/v1/${ROOT}`;
+    const USER_KEY = 'salon-stock-user' + (EMU ? '-emu' : '');
+    const LOCAL_BACKUP = 'salon-stock-local-backup' + (EMU ? '-emu' : '');
+    const CLOUD_FIELDS = ['counts', 'history', 'master', 'receipts', 'outs', 'closes', 'suppliers', 'sales'];
+    let user = null, salon = '', cc = null, timer = null, syncing = false, lastErr = '', members = null;
+    const ccKey = () => `salon-stock-cloud${EMU ? '-emu' : ''}:${user.uid}:${salon}`;
+    const ROLE_LABEL = { owner: 'オーナー', full: '全部', record: '記録だけ' };
+
+    // ---------- Firestore の値の変換 ----------
+    const toV = (v) => v === null || v === undefined ? { nullValue: null }
+      : v instanceof Date ? { timestampValue: v.toISOString() }
+      : typeof v === 'boolean' ? { booleanValue: v }
+      : typeof v === 'number' ? (Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v })
+      : typeof v === 'string' ? { stringValue: v }
+      : Array.isArray(v) ? { arrayValue: { values: v.map(toV) } }
+      : { mapValue: { fields: toF(v) } };
+    const toF = (o) => { const f = {}; for (const [k, v] of Object.entries(o)) if (v !== undefined) f[k] = toV(v); return f; };
+    const fromV = (v) => 'nullValue' in v ? null : 'booleanValue' in v ? v.booleanValue : 'integerValue' in v ? Number(v.integerValue)
+      : 'doubleValue' in v ? v.doubleValue : 'stringValue' in v ? v.stringValue : 'timestampValue' in v ? Date.parse(v.timestampValue)
+      : 'arrayValue' in v ? (v.arrayValue.values || []).map(fromV) : 'mapValue' in v ? fromF(v.mapValue.fields || {}) : null;
+    const fromF = (f) => { const o = {}; for (const [k, v] of Object.entries(f || {})) o[k] = fromV(v); return o; };
+    const docId = (name) => name.split('/').pop();
+
+    // ---------- ログイン（メール＋パスワード） ----------
+    const authErr = (j) => {
+      const m = (j && j.error && j.error.message) || '';
+      return /EMAIL_EXISTS/.test(m) ? 'このメールアドレスはもう登録されています。「ログイン」を押してください'
+        : /EMAIL_NOT_FOUND|INVALID_PASSWORD|INVALID_LOGIN_CREDENTIALS/.test(m) ? 'メールアドレスかパスワードが違います'
+        : /WEAK_PASSWORD/.test(m) ? 'パスワードは6文字以上にしてください'
+        : /INVALID_EMAIL/.test(m) ? 'メールアドレスの形が正しくありません'
+        : /TOO_MANY_ATTEMPTS/.test(m) ? '何度も失敗したため一時的にロックされています。しばらく待ってください'
+        : /OPERATION_NOT_ALLOWED/.test(m) ? 'Firebase でメール／パスワードのログインが有効になっていません'
+        : 'うまくいきませんでした（' + (m || '通信エラー') + '）';
+    };
+    async function authCall(path, body) {
+      const r = await fetch(`${C.id}/v1/${path}?key=${C.key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(authErr(j));
+      return j;
+    }
+    const setUser = (j, email) => {
+      user = { uid: j.localId || j.user_id, email: email || j.email, idToken: j.idToken || j.id_token, refreshToken: j.refreshToken || j.refresh_token, exp: Date.now() + Number(j.expiresIn || j.expires_in || 3600) * 1000 };
+      try { localStorage.setItem(USER_KEY, JSON.stringify(user)); } catch (e) {}
+    };
+    async function token() {
+      if (!user) throw new Error('ログインしていません');
+      if (user.exp - 60000 > Date.now()) return user.idToken;
+      const r = await fetch(`${C.st}/v1/token?key=${C.key}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(user.refreshToken) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error('ログインの期限が切れました。もう一度ログインしてください');
+      setUser(j, user.email);
+      return user.idToken;
+    }
+
+    // ---------- Firestore REST ----------
+    async function req(method, url, body) {
+      const r = await fetch(url, { method, headers: { Authorization: 'Bearer ' + await token(), 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      if (r.status === 404 && method === 'GET') return null;
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { const e = new Error((j.error && j.error.message) || ('HTTP ' + r.status)); e.status = r.status; throw e; }
+      return j;
+    }
+    const getDoc = async (path) => { const j = await req('GET', `${BASE}/${path}`); return j ? { id: docId(j.name), ...fromF(j.fields) } : null; };
+    async function listDocs(path) {
+      const out = []; let page = '';
+      do {
+        const j = await req('GET', `${BASE}/${path}?pageSize=300${page ? '&pageToken=' + page : ''}`);
+        for (const d of (j && j.documents) || []) out.push({ id: docId(d.name), ...fromF(d.fields) });
+        page = j && j.nextPageToken;
+      } while (page);
+      return out;
+    }
+    // at（サーバー時刻）が since より新しいものだけ取る（差分の同期）
+    async function since(col, ms) {
+      const out = []; let from = Math.max(0, ms - 60000); // 時刻の前後のずれに備えて1分重ねる
+      for (let i = 0; i < 40; i++) {
+        const j = await req('POST', `${BASE}/salons/${salon}:runQuery`, { structuredQuery: {
+          from: [{ collectionId: col }],
+          where: { fieldFilter: { field: { fieldPath: 'at' }, op: 'GREATER_THAN', value: { timestampValue: new Date(from).toISOString() } } },
+          orderBy: [{ field: { fieldPath: 'at' }, direction: 'ASCENDING' }], limit: 300 } });
+        const docs = (j || []).filter(x => x.document).map(x => ({ id: docId(x.document.name), ...fromF(x.document.fields) }));
+        out.push(...docs);
+        if (docs.length < 300) break;
+        from = docs[docs.length - 1].at;
+      }
+      return out;
+    }
+    // 書き込み：{ path, data, merge: true, serverAt: true } / { path, del: true }
+    async function commit(writes) {
+      for (let i = 0; i < writes.length; i += 400) {
+        const ws = writes.slice(i, i + 400).map(w => {
+          if (w.del) return { delete: `${ROOT}/${w.path}` };
+          const x = { update: { name: `${ROOT}/${w.path}`, fields: toF(w.data) } };
+          if (w.merge) x.updateMask = { fieldPaths: Object.keys(w.data).map(k => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : '`' + k + '`') };
+          if (w.serverAt !== false) x.updateTransforms = [{ fieldPath: 'at', setToServerValue: 'REQUEST_TIME' }];
+          return x;
+        });
+        await req('POST', `${BASE}:commit`, { writes: ws });
+      }
+    }
+    // オフラインでも記録できるよう、書き込みは順番待ちの列に入れてから送る
+    function enqueue(writes) { cc.queue.push(...writes); store(); flushSoon(); }
+    let flushT = null;
+    function flushSoon(ms = 1500) { clearTimeout(flushT); flushT = setTimeout(() => flush().then(() => pull()).catch(() => {}), ms); }
+    async function flush() {
+      if (!cc || !cc.queue.length || !navigator.onLine) return;
+      sealCount();
+      const n = cc.queue.length, batch = cc.queue.slice(0, n);
+      try { await commit(batch); cc.queue.splice(0, n); store(); lastErr = ''; }
+      catch (e) {
+        if (e.status === 403) { // 1件ずつ送り直し、権限がないものだけ捨てる（何度送っても通らない）
+          let dropped = 0;
+          for (const w of batch) { try { await commit([w]); } catch (x) { if (x.status === 403) dropped++; else { lastErr = '送信できませんでした'; status(); throw x; } } cc.queue.shift(); store(); }
+          lastErr = dropped ? `権限がないため保存できなかった記録が ${dropped} 件あります` : '';
+          status(); return;
+        } else lastErr = '送信できませんでした（' + e.message + '）。あとで自動でもう一度送ります';
+        status();
+        throw e;
+      }
+    }
+
+    // ---------- 端末内の控え ----------
+    const blank = () => ({ items: {}, costs: {}, events: {}, recvPrices: {}, closes: {}, settings: {}, salon: {}, role: '', since: {}, queue: [], openCount: null });
+    function store() { try { localStorage.setItem(ccKey(), JSON.stringify(cc)); } catch (e) { toast('保存容量が足りません'); } }
+    function loadCC() { try { cc = Object.assign(blank(), JSON.parse(localStorage.getItem(ccKey())) || {}); } catch (e) { cc = blank(); } }
+    const money = () => !!cc && (cc.role === 'owner' || cc.role === 'full');
+    const mine = (o) => Object.assign(o, { by: user.uid });
+
+    // ---------- 記録の追加（アプリの各操作から呼ばれる） ----------
+    const newId = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    // 数えた記録は2.5秒ごとに1件にまとめて送る（書き込み回数を減らす）
+    let countT = null;
+    function sealCount() {
+      clearTimeout(countT);
+      const id = cc.openCount; if (!id) return;
+      const ev = cc.events[id]; cc.openCount = null;
+      if (ev && ev.items.length) cc.queue.push({ path: `salons/${salon}/events/${id}`, data: { kind: 'count', items: ev.items, staff: ev.staff, ts: ev.ts, by: user.uid } });
+    }
+    const hooks = {
+      count(code, qty, place) {
+        let ev = cc.openCount && cc.events[cc.openCount];
+        if (!ev) { const id = newId('n'); ev = cc.events[id] = { id, kind: 'count', items: [], staff: state.staff || '', ts: Date.now(), at: Date.now(), by: user.uid, pending: true }; cc.openCount = id; }
+        const it = ev.items.find(x => x.c === code && x.p === place);
+        if (it) it.q += qty; else ev.items.push({ c: code, q: qty, p: place });
+        store(); clearTimeout(countT); countT = setTimeout(() => { sealCount(); store(); flushSoon(0); }, 2500);
+      },
+      reset() {
+        sealCount();
+        const id = newId('z'), d = mine({ kind: 'reset', ts: Date.now() });
+        cc.events[id] = { id, ...d, at: Date.now(), pending: true };
+        enqueue([{ path: `salons/${salon}/events/${id}`, data: d }]);
+      },
+      item(code) { hooks.items([code]); },
+      items(codes) {
+        const w = [];
+        for (const code of codes) {
+          const m = state.master[code]; if (!m) continue;
+          const it = { name: m.name || '', cat: m.cat || '', sell: m.sell ?? null, min: m.min ?? null, book: m.book ?? null };
+          cc.items[code] = { ...it, at: Date.now() };
+          w.push({ path: `salons/${salon}/items/${code}`, data: it });
+          if (money() && m.price) { cc.costs[code] = { price: m.price, at: Date.now() }; w.push({ path: `salons/${salon}/costs/${code}`, data: { price: m.price } }); }
+        }
+        if (w.length) enqueue(w);
+      },
+      recv(r) {
+        const d = mine({ kind: 'recv', date: r.date, supplier: r.supplier, slip: r.slip, lines: r.lines.map(l => ({ c: l.code, q: l.qty })), ts: r.created, deleted: false });
+        cc.events[r.id] = { id: r.id, ...d, at: Date.now(), pending: true };
+        const w = [{ path: `salons/${salon}/events/${r.id}`, data: d }];
+        if (money()) {
+          const p = {}; for (const l of r.lines) if (l.price !== '' && l.price != null) p[l.code] = l.price;
+          cc.recvPrices[r.id] = { p, at: Date.now() };
+          w.push({ path: `salons/${salon}/recvPrices/${r.id}`, data: { p } });
+        }
+        enqueue(w);
+      },
+      out(o) {
+        const d = mine({ kind: 'out', date: o.date, type: o.type, customer: o.customer, lines: o.lines.map(l => ({ c: l.code, q: l.qty, s: l.sell === '' ? null : l.sell })), ts: o.created, deleted: false });
+        cc.events[o.id] = { id: o.id, ...d, at: Date.now(), pending: true };
+        enqueue([{ path: `salons/${salon}/events/${o.id}`, data: d }]);
+      },
+      recvDel(id) { hooks.del(id); },
+      outDel(id) { hooks.del(id); },
+      del(id) {
+        if (cc.events[id]) cc.events[id].deleted = true;
+        enqueue([{ path: `salons/${salon}/events/${id}`, data: { deleted: true }, merge: true }]);
+      },
+      close(c) {
+        sealCount();
+        const d = { date: c.date, ts: c.at, counts: c.counts, prices: c.prices, summary: c.summary, by: user.uid };
+        cc.closes[c.id] = { id: c.id, ...d, at: Date.now() };
+        cc.salon.lastCloseAt = c.at;
+        enqueue([{ path: `salons/${salon}/closes/${c.id}`, data: d }, { path: `salons/${salon}`, data: { lastCloseAt: c.at }, merge: true }]);
+      },
+      undoClose(c, prev) {
+        delete cc.closes[c.id];
+        cc.salon.lastCloseAt = prev ? prev.at : 0;
+        enqueue([{ path: `salons/${salon}/closes/${c.id}`, del: true }, { path: `salons/${salon}`, data: { lastCloseAt: prev ? prev.at : 0 }, merge: true }]);
+        setTimeout(derive, 0); // 確定前の数を記録から戻す
+      },
+      settings() {
+        clearTimeout(hooks._st);
+        hooks._st = setTimeout(() => {
+          cc.settings.main = { suppliers: state.suppliers || {}, sales: String(state.sales || ''), at: Date.now() };
+          enqueue([{ path: `salons/${salon}/settings/main`, data: { suppliers: state.suppliers || {}, sales: String(state.sales || '') } }]);
+        }, 800);
+      },
+    };
+
+    // ---------- クラウドの記録から、画面用のデータを組み立てる ----------
+    function derive() {
+      if (!cc) return;
+      const master = {};
+      for (const [code, it] of Object.entries(cc.items)) master[code] = { name: it.name || '', cat: it.cat || '', sell: it.sell ?? null, min: it.min ?? null, book: it.book ?? null, price: 0 };
+      for (const [code, c] of Object.entries(cc.costs)) (master[code] = master[code] || { name: '', cat: '', price: 0, book: null }).price = c.price || 0;
+      state.master = master;
+      const lcAt = Number(cc.salon.lastCloseAt) || 0;
+      state.closes = money()
+        ? Object.values(cc.closes).sort((a, b) => a.ts - b.ts).map(c => ({ id: c.id, date: c.date, at: c.ts, counts: c.counts || {}, prices: c.prices || {}, summary: c.summary || {} }))
+        : (lcAt ? [{ id: 'last', date: '', at: lcAt, counts: {}, prices: {}, summary: {} }] : []);
+      const lc = state.closes[state.closes.length - 1], from = lc ? lc.at : 0;
+      const evs = Object.values(cc.events).filter(e => !e.deleted).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+      let counts = {};
+      for (const e of evs) {
+        if (!(e.ts > from)) continue;
+        if (e.kind === 'reset') counts = {};
+        if (e.kind !== 'count') continue;
+        for (const it of e.items || []) {
+          const c = counts[it.c] || (counts[it.c] = { qty: 0, places: {}, updated: 0 });
+          c.qty += it.q; c.places[it.p] = (c.places[it.p] || 0) + it.q; if (!c.places[it.p]) delete c.places[it.p];
+          c.updated = Math.max(c.updated, e.ts);
+        }
+      }
+      for (const k of Object.keys(counts)) if (!counts[k].qty && !Object.keys(counts[k].places).length) delete counts[k];
+      state.counts = counts;
+      const photoOf = state.photoOf || {};
+      state.receipts = evs.filter(e => e.kind === 'recv').map(e => {
+        const p = (cc.recvPrices[e.id] || {}).p || {};
+        // 単価が入っていない入庫（記録だけのスタッフが入れたもの）は、登録済みの仕入単価で計算する
+        return { id: e.id, date: e.date, supplier: e.supplier || '', slip: e.slip || '', lines: (e.lines || []).map(l => ({ code: l.c, qty: l.q, price: p[l.c] ?? ((cc.costs[l.c] || {}).price || '') })), photo: photoOf[e.id] || '', created: e.ts };
+      });
+      state.outs = evs.filter(e => e.kind === 'out').map(e => ({ id: e.id, date: e.date, type: e.type, customer: e.customer || '', lines: (e.lines || []).map(l => ({ code: l.c, qty: l.q, sell: l.s ?? '' })), created: e.ts }));
+      const st = cc.settings.main || {};
+      if (money()) { state.suppliers = st.suppliers || {}; state.sales = st.sales || ''; }
+      save();
+      document.body.classList.toggle('record-only', !money());
+      $('salonChip').style.display = ''; $('salonChip').textContent = cc.salon.name || '';
+      if (!money() && document.querySelector('nav button.active[data-tab="total"]')) document.querySelector('nav button[data-tab="count"]').click();
+      safeRender();
+    }
+    let renderLater = false;
+    const typing = () => { const a = document.activeElement; return a && /INPUT|SELECT|TEXTAREA/.test(a.tagName) && a.id !== 'cSalon'; };
+    function safeRender() { if (typing()) { renderLater = true; return; } renderLater = false; render(); status(); }
+    document.addEventListener('focusout', () => setTimeout(() => { if (renderLater && !typing()) safeRender(); }, 50));
+
+    // ---------- 同期 ----------
+    // 同期が重なったら、走っている同期の終わりを待つ
+    let pullP = null;
+    function pull() {
+      if (pullP) return pullP;
+      pullP = pullOnce().finally(() => { pullP = null; });
+      return pullP;
+    }
+    async function pullOnce() {
+      if (!cc || syncing || !navigator.onLine) return;
+      syncing = true;
+      try {
+        await flush().catch(() => {});
+        const me = await getDoc(`salons/${salon}/members/${user.uid}`).catch(e => { if (e.status === 403) return null; throw e; });
+        if (!me) { lastErr = 'このお店のメンバーではなくなりました'; cc.role = ''; status(); syncing = false; pullP = null; await chooseSalon(''); return; }
+        cc.role = me.role;
+        const sdoc = await getDoc(`salons/${salon}`); if (sdoc) cc.salon = sdoc;
+        const cols = ['items', 'events'].concat(money() ? ['costs', 'recvPrices', 'closes'] : []);
+        for (const col of cols) {
+          const docs = await since(col, cc.since[col] || 0);
+          for (const d of docs) { cc[col][d.id] = d; cc.since[col] = Math.max(cc.since[col] || 0, d.at || 0); }
+        }
+        if (money()) {
+          // 取り消された確定は一覧から消えるので、確定は全件で確かめる
+          const all = await listDocs(`salons/${salon}/closes`);
+          cc.closes = Object.fromEntries(all.map(d => [d.id, d]));
+          const st = await getDoc(`salons/${salon}/settings/main`); if (st) cc.settings.main = st;
+        }
+        cc.lastPull = Date.now(); lastErr = '';
+        store(); derive();
+      } catch (e) { lastErr = '同期できませんでした（' + e.message + '）'; status(); }
+      finally { syncing = false; }
+    }
+    function startLoop() {
+      clearInterval(timer);
+      timer = setInterval(() => { if (document.visibilityState === 'visible') pull(); }, 30000);
+    }
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && Cloud.on) pull(); });
+    window.addEventListener('online', () => { if (Cloud.on) pull(); });
+
+    // ---------- お店の選択・作成・参加 ----------
+    async function mySalons() { const u = await getDoc(`users/${user.uid}`).catch(() => null); return (u && u.salons) || {}; }
+    async function chooseSalon(id, name) {
+      if (cc && salon) { try { await flush(); } catch (e) {} }
+      salon = id || '';
+      try { localStorage.setItem(USER_KEY + ':salon', salon); } catch (e) {}
+      if (!salon) { leaveCloudView(); fillUI(); return; }
+      enterCloudView();
+      loadCC();
+      if (name && !cc.salon.name) cc.salon.name = name;
+      derive(); startLoop(); fillUI();
+      await pull(); fillUI();
+    }
+    // クラウドを使い始めるとき、このスマホのデータを控えに取っておく（ログアウトで元に戻す）
+    function enterCloudView() {
+      try {
+        if (!localStorage.getItem(LOCAL_BACKUP)) {
+          const b = {}; for (const k of CLOUD_FIELDS) b[k] = state[k];
+          localStorage.setItem(LOCAL_BACKUP, JSON.stringify(b));
+        }
+      } catch (e) {}
+      Cloud.on = true;
+    }
+    function leaveCloudView() {
+      Cloud.on = false; clearInterval(timer); cc = null;
+      try {
+        const b = JSON.parse(localStorage.getItem(LOCAL_BACKUP));
+        if (b) { for (const k of CLOUD_FIELDS) if (k in b) state[k] = b[k]; localStorage.removeItem(LOCAL_BACKUP); }
+      } catch (e) {}
+      document.body.classList.remove('record-only'); $('salonChip').style.display = 'none';
+      save(); render();
+    }
+    const genId = () => 's' + Array.from(crypto.getRandomValues(new Uint8Array(12)), b => 'abcdefghijkmnpqrstuvwxyz23456789'[b % 32]).join('');
+    const genCode = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), b => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 32]).join('');
+    async function createSalon(name) {
+      const id = genId(), list = await mySalons();
+      await commit([
+        { path: `salons/${id}`, data: { name, owner: user.uid } },
+        { path: `salons/${id}/members/${user.uid}`, data: { role: 'owner', email: user.email } },
+        { path: `users/${user.uid}`, data: { salons: { ...list, [id]: name } }, merge: true, serverAt: false },
+      ]);
+      return id;
+    }
+    async function joinSalon(code) {
+      const inv = await getDoc(`invites/${code}`);
+      if (!inv) throw new Error('招待コードが見つかりません');
+      if (inv.expires < Date.now()) throw new Error('招待コードの期限が切れています');
+      if (!confirm(`「${inv.salonName}」に「${ROLE_LABEL[inv.role]}」の権限で参加しますか？`)) return '';
+      const list = await mySalons();
+      await commit([
+        { path: `salons/${inv.salon}/members/${user.uid}`, data: { role: inv.role, email: user.email, invite: code } },
+        { path: `users/${user.uid}`, data: { salons: { ...list, [inv.salon]: inv.salonName } }, merge: true, serverAt: false },
+      ]);
+      return inv.salon;
+    }
+    async function invite(role) {
+      const code = genCode();
+      await commit([{ path: `invites/${code}`, data: { salon, salonName: cc.salon.name || '', role, by: user.uid, expires: new Date(Date.now() + 7 * 864e5) } }]);
+      return code;
+    }
+    // このスマホのデータを、今のお店のクラウドに移す（オーナー・全部の人）
+    async function migrate() {
+      let b = null; try { b = JSON.parse(localStorage.getItem(LOCAL_BACKUP)); } catch (e) {}
+      if (!b) throw new Error('移すデータがありません');
+      const w = [];
+      for (const [code, m] of Object.entries(b.master || {})) {
+        w.push({ path: `salons/${salon}/items/${code}`, data: { name: m.name || '', cat: m.cat || '', sell: m.sell ?? null, min: m.min ?? null, book: m.book ?? null } });
+        if (m.price) w.push({ path: `salons/${salon}/costs/${code}`, data: { price: m.price } });
+      }
+      for (const r of b.receipts || []) {
+        w.push({ path: `salons/${salon}/events/${r.id}`, data: { kind: 'recv', date: r.date, supplier: r.supplier || '', slip: r.slip || '', lines: r.lines.map(l => ({ c: l.code, q: l.qty })), ts: r.created, deleted: false, by: user.uid } });
+        const p = {}; for (const l of r.lines) if (l.price !== '' && l.price != null) p[l.code] = l.price;
+        w.push({ path: `salons/${salon}/recvPrices/${r.id}`, data: { p } });
+      }
+      for (const o of b.outs || []) w.push({ path: `salons/${salon}/events/${o.id}`, data: { kind: 'out', date: o.date, type: o.type, customer: o.customer || '', lines: o.lines.map(l => ({ c: l.code, q: l.qty, s: l.sell === '' ? null : l.sell })), ts: o.created, deleted: false, by: user.uid } });
+      let lastAt = 0;
+      for (const c of b.closes || []) {
+        const id = c.id || ('c' + c.at.toString(36));
+        w.push({ path: `salons/${salon}/closes/${id}`, data: { date: c.date, ts: c.at, counts: c.counts || {}, prices: c.prices || {}, summary: c.summary || {}, by: user.uid } });
+        lastAt = Math.max(lastAt, c.at);
+      }
+      if (lastAt) w.push({ path: `salons/${salon}`, data: { lastCloseAt: lastAt }, merge: true });
+      const items = [];
+      for (const [code, c] of Object.entries(b.counts || {})) for (const [p, q] of Object.entries(c.places || {})) if (q) items.push({ c: code, q, p });
+      if (items.length) w.push({ path: `salons/${salon}/events/${newId('n')}`, data: { kind: 'count', items, staff: state.staff || '', ts: Math.max(Date.now(), lastAt + 1), by: user.uid } });
+      await commit(w);
+      return w.length;
+    }
+
+    // ---------- 画面 ----------
+    function status() {
+      if (!Cloud.on || !cc) return;
+      const q = cc.queue.length + (cc.openCount ? 1 : 0);
+      $('cSync').textContent = (cc.lastPull ? `最終同期：${new Date(cc.lastPull).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}` : 'まだ同期していません')
+        + (q ? `　未送信 ${q} 件` : '　すべて送信済み');
+      $('cMsg').textContent = lastErr;
+    }
+    async function fillUI() {
+      $('cloudOut').style.display = user ? 'none' : '';
+      $('cloudIn').style.display = user ? '' : 'none';
+      if (!user) return;
+      $('cWho').textContent = user.email;
+      const list = await mySalons().catch(() => ({}));
+      $('cSalon').innerHTML = '<option value="">（クラウドを使わない：このスマホだけ）</option>' + Object.entries(list).map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join('');
+      $('cSalon').value = salon in list || !salon ? salon : '';
+      const role = cc ? cc.role : '';
+      $('cRole').textContent = salon ? `あなたの権限：${ROLE_LABEL[role] || '確認中'}` : 'お店を選ぶか、新しく作ってください。';
+      $('cOwner').style.display = role === 'owner' ? '' : 'none';
+      $('cLeave').style.display = salon && role && role !== 'owner' ? '' : 'none';
+      let hasLocal = false; try { const b = JSON.parse(localStorage.getItem(LOCAL_BACKUP)); hasLocal = !!b && (Object.keys(b.master || {}).length || (b.receipts || []).length || (b.outs || []).length || Object.keys(b.counts || {}).length); } catch (e) {}
+      const migrated = !!localStorage.getItem(LOCAL_BACKUP + ':migrated:' + salon);
+      $('cMigrate').style.display = salon && money() && hasLocal && !migrated ? '' : 'none';
+      status();
+    }
+    async function renderMembers() {
+      try {
+        members = await listDocs(`salons/${salon}/members`);
+        $('cMembers').innerHTML = '<div class="table-wrap"><table>' + members.map(m => `<tr><td>${esc(m.email || m.id)}</td><td>${m.role === 'owner' ? 'オーナー'
+          : `<select data-mrole="${esc(m.id)}" style="width:auto;padding:4px"><option value="record" ${m.role === 'record' ? 'selected' : ''}>記録だけ</option><option value="full" ${m.role === 'full' ? 'selected' : ''}>全部</option></select>`}</td>
+          <td>${m.role === 'owner' ? '' : `<button class="btn danger" data-mdel="${esc(m.id)}">外す</button>`}</td></tr>`).join('') + '</table></div>';
+      } catch (e) { $('cMembers').textContent = '読み込めませんでした：' + e.message; }
+    }
+    const busy = async (btn, fn) => { btn.disabled = true; $('cMsg').textContent = ''; try { await fn(); } catch (e) { $('cMsg').textContent = e.message; } finally { btn.disabled = false; } };
+    $('cSignup').addEventListener('click', e => busy(e.target, async () => {
+      const email = $('cEmail').value.trim(), pass = $('cPass').value;
+      setUser(await authCall('accounts:signUp', { email, password: pass, returnSecureToken: true }), email);
+      $('cPass').value = ''; toast('登録しました'); await afterLogin();
+    }));
+    $('cLogin').addEventListener('click', e => busy(e.target, async () => {
+      const email = $('cEmail').value.trim(), pass = $('cPass').value;
+      setUser(await authCall('accounts:signInWithPassword', { email, password: pass, returnSecureToken: true }), email);
+      $('cPass').value = ''; toast('ログインしました'); await afterLogin();
+    }));
+    $('cReset').addEventListener('click', e => busy(e.target, async () => {
+      const email = $('cEmail').value.trim(); if (!email) throw new Error('メールアドレスを入れてください');
+      await authCall('accounts:sendOobCode', { requestType: 'PASSWORD_RESET', email });
+      toast('パスワード再設定のメールを送りました');
+    }));
+    $('cLogout').addEventListener('click', async e => {
+      e.preventDefault();
+      if (cc && (cc.queue.length || cc.openCount)) { try { await flush(); } catch (x) { if (!confirm('まだ送れていない記録があります。ログアウトすると消えます。よろしいですか？')) return; } }
+      if (salon) leaveCloudView();
+      user = null; salon = '';
+      try { localStorage.removeItem(USER_KEY); localStorage.removeItem(USER_KEY + ':salon'); } catch (x) {}
+      fillUI(); toast('ログアウトしました');
+    });
+    $('cSalon').addEventListener('change', e => chooseSalon(e.target.value));
+    $('cSyncNow').addEventListener('click', e => busy(e.target, async () => { await flush().catch(() => {}); await pull(); fillUI(); toast('同期しました'); }));
+    $('cCreate').addEventListener('click', e => busy(e.target, async () => {
+      const name = $('cNewName').value.trim(); if (!name) throw new Error('お店の名前を入れてください');
+      const id = await createSalon(name); $('cNewName').value = '';
+      toast(`「${name}」を作りました`); await chooseSalon(id, name);
+    }));
+    $('cJoin').addEventListener('click', e => busy(e.target, async () => {
+      const code = $('cJoinCode').value.trim().toUpperCase(); if (!code) throw new Error('招待コードを入れてください');
+      const id = await joinSalon(code); if (!id) return;
+      $('cJoinCode').value = ''; toast('参加しました'); await chooseSalon(id);
+    }));
+    $('cInvite').addEventListener('click', e => busy(e.target, async () => {
+      const role = $('cInvRole').value, code = await invite(role);
+      const link = `${location.origin}${location.pathname}?join=${code}`;
+      $('cInvOut').innerHTML = `<p>招待コード：<b style="font-size:20px;letter-spacing:2px">${code}</b>（${ROLE_LABEL[role]}・7日間有効）</p><p class="muted" style="word-break:break-all">${esc(link)}</p><div class="btns"><button class="btn" id="cInvShare">📤 送る（LINE・メールなど）</button></div>`;
+      $('cInvShare').onclick = () => {
+        const text = `サロンストック「${cc.salon.name}」への招待です。\n1. ${link} を開く\n2. 「設定」でメールアドレスを登録・ログイン\n3. 招待コード ${code} で参加`;
+        if (navigator.share) navigator.share({ text }).catch(() => {}); else { navigator.clipboard && navigator.clipboard.writeText(text); toast('コピーしました'); }
+      };
+    }));
+    $('cMembersBox').addEventListener('toggle', e => { if (e.target.open) renderMembers(); });
+    $('cMembers').addEventListener('change', async e => {
+      const uid = e.target.dataset.mrole; if (!uid) return;
+      try { await commit([{ path: `salons/${salon}/members/${uid}`, data: { role: e.target.value }, merge: true, serverAt: false }]); toast('権限を変えました'); }
+      catch (x) { toast('変えられませんでした'); renderMembers(); }
+    });
+    $('cMembers').addEventListener('click', async e => {
+      const uid = e.target.dataset.mdel; if (!uid) return;
+      const m = members.find(x => x.id === uid);
+      if (!confirm(`${m ? m.email : uid} をこのお店から外しますか？`)) return;
+      try { await commit([{ path: `salons/${salon}/members/${uid}`, del: true }]); toast('外しました'); renderMembers(); }
+      catch (x) { toast('外せませんでした'); }
+    });
+    $('cLeave').addEventListener('click', async () => {
+      if (!confirm(`「${cc.salon.name}」から抜けますか？`)) return;
+      try {
+        await commit([{ path: `salons/${salon}/members/${user.uid}`, del: true }]);
+        const list = await mySalons(); delete list[salon];
+        await commit([{ path: `users/${user.uid}`, data: { salons: list }, serverAt: false }]);
+        await chooseSalon('');
+      } catch (x) { toast('抜けられませんでした'); }
+    });
+    $('cMigrate').addEventListener('click', e => busy(e.target, async () => {
+      if (!confirm('このスマホに入っている商品・入庫・出庫・確定・数えた結果を、今のお店のクラウドに移します。よろしいですか？（1回だけ行ってください）')) return;
+      const n = await migrate();
+      try { localStorage.setItem(LOCAL_BACKUP + ':migrated:' + salon, '1'); } catch (x) {}
+      toast(`クラウドに移しました（${n} 件）`); cc.since = {}; await pull(); fillUI();
+    }));
+    async function afterLogin() {
+      const list = await mySalons().catch(() => ({}));
+      const join = new URLSearchParams(location.search).get('join');
+      if (join) { $('cJoinCode').value = join; $('cJoinBox').open = true; }
+      const ids = Object.keys(list);
+      await chooseSalon(ids.length === 1 && !join ? ids[0] : (salon && list[salon] ? salon : ''));
+      fillUI();
+    }
+
+    return {
+      on: false, money, derive, pull,
+      hook(kind, ...a) { hooks[kind](...a); },
+      async init() {
+        try { user = JSON.parse(localStorage.getItem(USER_KEY)); } catch (e) { user = null; }
+        const join = new URLSearchParams(location.search).get('join');
+        if (join) { $('cJoinCode').value = join; $('cJoinBox').open = true; if (!user) toast('招待されています。「設定」でログインしてください'); }
+        if (!user) { fillUI(); return; }
+        const s = localStorage.getItem(USER_KEY + ':salon') || '';
+        if (s) { salon = s; enterCloudView(); loadCC(); derive(); startLoop(); pull().then(fillUI); }
+        fillUI();
+      },
+    };
+  })();
+
   function render() { renderList(); renderTotal(); renderMasterInfo(); renderRecv(); renderOut(); }
   load();
   showDraftPhoto();
+  setTimeout(() => Cloud.init(), 0);
   $('staff').value = state.staff; $('place').value = state.place;
   $('optAuto').checked = state.opt.auto; $('optLookup').checked = state.opt.lookup;
   $('optAuto').addEventListener('change', e => { state.opt.auto = e.target.checked; save(); });

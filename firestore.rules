@@ -1,10 +1,24 @@
 rules_version = '2';
-// サロンストック：みんなの品名データベースのルール
-// ・products/{バーコード}/names/{ユーザーID} に、各ユーザーが登録した品名と種類を保存する
-// ・ログイン（匿名）したユーザーだけが読める
-// ・書き込みは自分の登録だけ。バーコードの形・項目・文字数をチェックする
+// サロンストック：Firestore のルール
+//
+// 1) みんなの品名データベース
+//    products/{バーコード}/names/{ユーザーID} … 品名と種類だけ。自分の登録だけ書き換えられる
+//
+// 2) お店のクラウド
+//    salons/{お店}                … お店の情報（名前・オーナー・前回の確定日時）
+//    salons/{お店}/members/{ユーザー} … メンバーと権限（owner / full / record）
+//    salons/{お店}/items/{バーコード}  … 品名・種類・販売単価・発注点など（メンバー全員）
+//    salons/{お店}/costs/{バーコード}  … 仕入単価（owner と full だけ）
+//    salons/{お店}/events/{ID}        … 数えた・入庫・出庫の記録（メンバー全員）
+//    salons/{お店}/recvPrices/{ID}    … 納品書の単価（owner と full だけ）
+//    salons/{お店}/closes/{ID}        … 棚卸の確定と材料費（owner と full だけ）
+//    salons/{お店}/settings/{ID}      … 締日・技術売上（owner と full だけ）
+//    invites/{招待コード}               … スタッフ招待（オーナーが作る）
+//    users/{ユーザー}                  … 自分が入っているお店の一覧（本人だけ）
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // ---------- 1) みんなの品名データベース ----------
     match /products/{jan}/names/{uid} {
       allow read: if request.auth != null;
       allow create, update: if request.auth != null
@@ -19,7 +33,89 @@ service cloud.firestore {
         && request.resource.data.at is timestamp;
       allow delete: if request.auth != null && request.auth.uid == uid;
     }
-    // それ以外はすべて禁止
+
+    // ---------- 2) お店のクラウド ----------
+    function signedIn() { return request.auth != null && request.auth.token.email != null; }
+    function memberPath(s) { return /databases/$(database)/documents/salons/$(s)/members/$(request.auth.uid); }
+    function isMember(s) { return signedIn() && exists(memberPath(s)); }
+    function roleOf(s) { return get(memberPath(s)).data.role; }
+    function isOwner(s) { return isMember(s) && roleOf(s) == 'owner'; }
+    function canMoney(s) { return isMember(s) && roleOf(s) in ['owner', 'full']; }
+    function onlyChanges(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
+
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /invites/{code} {
+      // 招待コードを知っている人だけが1件ずつ読める（一覧は見られない）
+      allow get: if signedIn();
+      allow create: if isOwner(request.resource.data.salon)
+        && request.resource.data.role in ['full', 'record']
+        && request.resource.data.by == request.auth.uid;
+      allow delete: if signedIn() && isOwner(resource.data.salon);
+    }
+
+    match /salons/{s} {
+      allow read: if isMember(s);
+      allow create: if signedIn()
+        && request.resource.data.owner == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 60;
+      allow update: if (isOwner(s) && onlyChanges(['name', 'lastCloseAt', 'at']))
+        || (canMoney(s) && onlyChanges(['lastCloseAt', 'at']));
+
+      match /members/{uid} {
+        allow read: if isMember(s);
+        allow create: if signedIn() && request.auth.uid == uid && (
+          // お店を作った本人がオーナーとして入る
+          (request.resource.data.role == 'owner'
+            && getAfter(/databases/$(database)/documents/salons/$(s)).data.owner == request.auth.uid)
+          // 招待コードで参加（コードの店と権限が一致し、期限内）
+          || (request.resource.data.role in ['full', 'record']
+            && get(/databases/$(database)/documents/invites/$(request.resource.data.invite)).data.salon == s
+            && get(/databases/$(database)/documents/invites/$(request.resource.data.invite)).data.role == request.resource.data.role
+            && get(/databases/$(database)/documents/invites/$(request.resource.data.invite)).data.expires > request.time)
+        );
+        // 権限の変更はオーナーだけ（オーナー自身の権限は変えない）
+        allow update: if isOwner(s) && uid != request.auth.uid
+          && onlyChanges(['role']) && request.resource.data.role in ['full', 'record'];
+        // オーナーはメンバーを外せる。本人は自分で抜けられる（オーナー以外）
+        allow delete: if (isOwner(s) && uid != request.auth.uid)
+          || (signedIn() && uid == request.auth.uid && resource.data.role != 'owner');
+      }
+
+      match /items/{code} {
+        allow read: if isMember(s);
+        allow write: if isMember(s) && !('price' in request.resource.data);
+      }
+      match /costs/{code} {
+        allow read, write: if canMoney(s);
+      }
+      match /events/{id} {
+        allow read: if isMember(s);
+        allow create: if isMember(s)
+          && request.resource.data.by == request.auth.uid
+          && request.resource.data.kind in ['count', 'reset', 'recv', 'out']
+          && !('price' in request.resource.data);
+        // 記録の取り消し（削除の印を付けるだけ）。自分の記録か、お金の権限がある人
+        allow update: if isMember(s)
+          && (resource.data.by == request.auth.uid || canMoney(s))
+          && onlyChanges(['deleted', 'at']);
+      }
+      match /recvPrices/{id} {
+        allow read, write: if canMoney(s);
+      }
+      match /closes/{id} {
+        allow read, create, update, delete: if canMoney(s);
+      }
+      match /settings/{id} {
+        allow read, write: if canMoney(s);
+      }
+    }
+
+    // ---------- それ以外はすべて禁止 ----------
     match /{document=**} {
       allow read, write: if false;
     }
