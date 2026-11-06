@@ -5,7 +5,7 @@
 const CACHE = 'salon-stock-v1';
 const CORE = ['./', './index.html', './guide.html', './manifest.json', './icon-180.png', './icon-192.png', './icon-512.png'];
 const LIBS = ['https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js'];
-const LIB_HOSTS = ['unpkg.com', 'cdn.jsdelivr.net'];
+const LIB_HOSTS = ['unpkg.com', 'cdn.jsdelivr.net', 'cdnjs.cloudflare.com'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil((async () => {

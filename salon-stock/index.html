@@ -120,7 +120,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 3.3</small><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 3.4</small><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -232,6 +232,15 @@
       <div id="supplierSum" style="margin-top:10px"></div>
       <div class="btns"><button id="closeBtn" class="btn primary">棚卸を確定して次の期間へ</button></div>
       <p class="muted">確定すると、今回数えた数が次の期間の「前回の在庫」になり、数えた結果は空になります。未カウントの商品は0個として確定されます。</p>
+    </div>
+    <div class="card">
+      <h2>Excelに書き出す・共有する</h2>
+      <p class="muted">「仕入・出庫管理」と「在庫管理」の2つのシートが入ったExcelファイルを作ります。今期（前回の確定から今日まで）の入庫・材料使用・店販の出庫と、仕入先ごとの在庫が入ります。</p>
+      <div class="btns">
+        <button id="xlsxShare" class="btn primary">📤 共有（LINE・メールなど）</button>
+        <button id="xlsxSave" class="btn">💾 ファイルに保存</button>
+      </div>
+      <p class="muted" id="xlsxInfo"></p>
     </div>
     <div class="card">
       <h2>発注の目安</h2>
@@ -875,7 +884,8 @@
     const line = scanMode === 'recv' && state.draft.lines.find(l => l.code === code);
     $('hitInfo').innerHTML = `<div id="hitName" style="text-align:center;font-weight:bold;font-size:18px">${esc(nameOf(code))}</div>
       <div class="muted" style="text-align:center">${esc(code)}</div>
-      ${line ? `<label>単価（円）</label><input type="number" inputmode="numeric" data-rprice="${esc(code)}" value="${esc(line.price)}" placeholder="納品書の単価">` : ''}
+      ${line ? `<div class="row"><div><label>仕入単価（円）</label><input type="number" inputmode="numeric" data-rprice="${esc(code)}" value="${esc(line.price)}" placeholder="納品書の単価"></div>
+        <div><label>販売単価（円・任意）</label><input type="number" inputmode="numeric" data-sell="${esc(code)}" value="${esc((state.master[code] || {}).sell ?? '')}" placeholder="店販の売価"></div></div>` : ''}
       <div id="hitMore"></div>`;
     renderInfo($('hitMore'), code);
     if (!$('hit').classList.contains('show')) $('hitScroll').scrollTop = 0;
@@ -1446,6 +1456,100 @@
     const sup = e.target.dataset.closefor; if (sup === undefined) return;
     state.suppliers[sup] = Object.assign({}, state.suppliers[sup], { close: e.target.value });
     save(); renderBilling();
+  });
+
+  // ========== 販売単価（店販の売価） ==========
+  document.addEventListener('change', e => {
+    const c = e.target.dataset && e.target.dataset.sell; if (c === undefined) return;
+    const m = state.master[c] || (state.master[c] = { name: '', price: 0, book: null });
+    m.sell = e.target.value === '' ? null : Number(e.target.value); save();
+  });
+
+  // ========== Excel（仕入・出庫管理／在庫管理）==========
+  const TAX = 0.1;
+  const toDate = (s) => { const [y, m, d] = String(s).split('-').map(Number); return new Date(y, m - 1, d); };
+  // 商品ごとの仕入先（いちばん最近の納品書の仕入先）
+  function supplierOf() {
+    const sup = {};
+    for (const r of state.receipts.slice().sort((a, b) => a.created - b.created)) for (const l of r.lines) sup[l.code] = r.supplier || '仕入先なし';
+    return sup;
+  }
+  function buildWorkbook() {
+    const XLSX = window.XLSX, lc = lastClose(), all = buildTotal(), recs = periodReceipts();
+    const nm = (c) => nameOf(c), num = (v) => (v === '' || v == null ? null : Number(v));
+    // --- 仕入・出庫管理（1行1件）
+    const rows = [];
+    for (const r of recs.slice().sort((a, b) => a.date.localeCompare(b.date))) for (const l of r.lines) {
+      const pr = num(l.price);
+      rows.push([toDate(r.date), l.code, nm(l.code), l.qty, pr, pr == null ? null : pr * l.qty, null, null, null, null, null, null, null, null, r.supplier || null]);
+    }
+    const usedDate = toDate(today()); // 材料使用・出庫は書き出した日付でまとめて1行
+    for (const t of all) {
+      if (t.used == null || t.used <= 0) continue;
+      const pr = t.price || null;
+      if (t.cat === RETAIL) { // 店販品は「出庫」として販売金額を出す
+        const sell = num((state.master[t.code] || {}).sell);
+        const amt = sell == null ? null : sell * t.used;
+        rows.push([usedDate, t.code, t.name, null, pr, null, null, null, t.used, sell, amt, amt == null ? null : Math.round(amt * TAX), amt == null ? null : amt + Math.round(amt * TAX), null, null]);
+      } else { // それ以外は「材料使用」
+        rows.push([usedDate, t.code, t.name, null, pr, null, t.used, pr == null ? null : pr * t.used, null, null, null, null, null, null, null]);
+      }
+    }
+    const sum = (i) => rows.reduce((s, r) => s + (Number(r[i]) || 0), 0);
+    const sheet1 = [
+      [null, null, null, '仕入', sum(5), null, '材料費', sum(7), null, '商品販売', sum(12)],
+      [lc ? `期間：${lc.date} の確定より後〜${today()}` : `期間：〜${today()}（まだ確定なし）`],
+      ['日付', 'コード', '商品名', '入庫数', '仕入単価', '仕入金額', '材料使用数', '材料費', '出庫数', '商品単価', '商品金額', '消費税', '販売金額', 'お客様名', '仕入先'],
+      ...rows,
+    ];
+    const ws1 = XLSX.utils.aoa_to_sheet(sheet1, { cellDates: true });
+    ws1['!cols'] = [12, 15, 40, 7, 9, 10, 9, 10, 7, 9, 10, 8, 10, 14, 14].map(w => ({ wch: w }));
+    for (let r = 3; r < sheet1.length; r++) { const c = ws1[XLSX.utils.encode_cell({ r, c: 0 })]; if (c) c.z = 'yyyy/m/d'; }
+    // --- 在庫管理（仕入先ごとの表を横に並べる）
+    const sup = supplierOf(), groups = {};
+    for (const t of all) { const g = sup[t.code] || '仕入先なし'; (groups[g] = groups[g] || []).push(t); }
+    const names = Object.keys(groups).sort((a, b) => (a === '仕入先なし') - (b === '仕入先なし') || groups[b].length - groups[a].length);
+    const grid = [];
+    names.forEach((g, gi) => {
+      const col = gi * 7;
+      const put = (r, c, v) => { (grid[r] = grid[r] || [])[col + c] = v; };
+      ['コード', g, '仕入金額', '販売金額', '月始在庫数', '月末在庫数'].forEach((h, i) => put(0, i, h));
+      groups[g].sort((a, b) => a.name.localeCompare(b.name, 'ja')).forEach((t, i) => {
+        const m = state.master[t.code] || {};
+        put(i + 1, 0, t.code); put(i + 1, 1, t.name); put(i + 1, 2, t.price || null); put(i + 1, 3, num(m.sell));
+        put(i + 1, 4, t.prev ?? null); put(i + 1, 5, t.counted ? t.qty : null);
+      });
+    });
+    for (let r = 0; r < grid.length; r++) grid[r] = grid[r] || [];
+    const ws2 = XLSX.utils.aoa_to_sheet(grid.length ? grid : [['データがありません']]);
+    ws2['!cols'] = names.flatMap(() => [15, 36, 9, 9, 9, 9, 3]).map(w => ({ wch: w }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws1, '仕入・出庫管理');
+    XLSX.utils.book_append_sheet(wb, ws2, '在庫管理');
+    return { wb, count: rows.length, sups: names.length };
+  }
+  async function makeXlsx() {
+    if (!window.XLSX) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+    const { wb, count, sups } = buildWorkbook();
+    const buf = window.XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellDates: true });
+    const name = `サロンストック_${today().replace(/-/g, '')}.xlsx`;
+    $('xlsxInfo').textContent = `仕入・出庫管理 ${count} 行、在庫管理 ${sups} 社分を作りました。`;
+    return new File([buf], name, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  }
+  function saveFile(file) {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+  $('xlsxSave').addEventListener('click', async () => {
+    try { saveFile(await makeXlsx()); } catch (e) { console.error(e); toast('Excelを作れませんでした。通信を確認してください'); }
+  });
+  $('xlsxShare').addEventListener('click', async () => {
+    let file;
+    try { file = await makeXlsx(); } catch (e) { console.error(e); toast('Excelを作れませんでした。通信を確認してください'); return; }
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: file.name, text: 'サロンストックの仕入・出庫管理／在庫管理' }); }
+      catch (e) { if (e.name !== 'AbortError') saveFile(file); }
+    } else { saveFile(file); toast('共有に対応していないため、ファイルとして保存しました'); }
   });
   function render() { renderList(); renderTotal(); renderMasterInfo(); renderRecv(); }
   load();
