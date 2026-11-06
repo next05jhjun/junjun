@@ -157,7 +157,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.8</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.9</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -297,6 +297,18 @@
         <button id="clearBtn" class="btn danger">全部消す</button>
       </div>
       <p class="muted">複数人で数えたときは、各自がCSVを書き出して、集計する人に送ってください。</p>
+    </div>
+    <div class="card money" id="priceCard">
+      <h2>仕入単価をまとめて入れる</h2>
+      <p class="muted">納品書や請求書を見ながら、1個あたりの仕入単価（税抜）を入れてください。入れたらすぐ保存されます。在庫金額・材料費・原価率の計算に使います。店販品は販売単価も入れられます。</p>
+      <p id="priceInfo" style="font-weight:bold;margin:6px 0"></p>
+      <div class="row">
+        <select id="priceFilter" aria-label="表示する商品"><option value="none">単価がまだだけ</option><option value="all">すべて</option></select>
+        <select id="priceSup" aria-label="仕入先で絞り込む"></select>
+      </div>
+      <select id="priceCat" aria-label="種類で絞り込む" style="margin-top:8px"></select>
+      <input id="priceQ" placeholder="品名・バーコードで探す" style="margin-top:8px" autocomplete="off">
+      <div class="table-wrap"><table id="priceTable"></table></div>
     </div>
   </section>
 
@@ -1168,6 +1180,44 @@
     }).join('');
   }
   $('listCat').addEventListener('change', renderList);
+
+  // ---------- 仕入単価をまとめて入れる ----------
+  const keepPrice = new Set();
+  function priceItems() { // 数えた・在庫がある・入庫した・名前がある商品
+    return buildTotal().filter(t => t.counted || (t.book || 0) > 0 || (t.prev || 0) > 0 || t.inq || (state.master[t.code] || {}).name);
+  }
+  function renderPrices() {
+    if (!canMoney()) return;
+    const items = priceItems(), sup = supplierOf();
+    const noPrice = items.filter(t => !t.price).length;
+    $('priceInfo').innerHTML = items.length ? (noPrice ? `単価がまだの商品：<span class="minus">${noPrice}</span> / ${items.length} 品目` : `✓ 全部の商品に単価が入っています（${items.length} 品目）`) : '';
+    fillCatSelect($('priceCat'));
+    const sv = $('priceSup').value, sups = uniq(items.map(t => sup[t.code] || '仕入先なし')).sort((a, b) => (a === '仕入先なし') - (b === '仕入先なし') || a.localeCompare(b, 'ja'));
+    $('priceSup').innerHTML = '<option value="">すべての仕入先</option>' + sups.map(x => `<option>${esc(x)}</option>`).join('');
+    $('priceSup').value = sups.includes(sv) ? sv : '';
+    const f = $('priceFilter').value, cf = $('priceCat').value, sf = $('priceSup').value, q = $('priceQ').value.trim();
+    const rows = items.filter(t => (f === 'all' || !t.price || keepPrice.has(t.code)) && (!cf || (cf === '-' ? !t.cat : t.cat === cf))
+      && (!sf || (sup[t.code] || '仕入先なし') === sf) && (!q || t.name.includes(q) || t.code.includes(q)))
+      .sort((a, b) => (a.cat || '').localeCompare(b.cat || '', 'ja') || a.name.localeCompare(b.name, 'ja'));
+    $('priceTable').innerHTML = !items.length ? '<tr><td class="muted">まだ商品がありません。「数える」か「入庫」で商品を読むと、ここに並びます。</td></tr>'
+      : !rows.length ? `<tr><td class="muted">${f === 'none' && !noPrice ? '単価がまだの商品はありません 🎉' : '当てはまる商品がありません。'}</td></tr>`
+      : '<tr><th>商品</th><th class="num">仕入単価</th><th class="num">販売単価</th></tr>' + rows.map(t => `<tr>
+        <td>${t.cat ? `<span class="cat-tag">${esc(t.cat)}</span>` : ''}${esc(t.name)}<br><span class="muted">${esc(t.code)}　${esc(sup[t.code] || '仕入先なし')}　在庫 ${t.counted ? t.qty : Math.max(0, t.book ?? 0)}</span></td>
+        <td class="num"><input class="qty-input" style="width:90px" type="number" inputmode="numeric" min="0" placeholder="円" value="${t.price || ''}" data-pprice="${esc(t.code)}" aria-label="仕入単価"></td>
+        <td class="num">${t.cat === RETAIL || t.sell != null ? `<input class="qty-input" style="width:90px" type="number" inputmode="numeric" min="0" placeholder="円" value="${t.sell ?? ''}" data-psell="${esc(t.code)}" aria-label="販売単価">` : '<span class="muted">-</span>'}</td></tr>`).join('');
+  }
+  ['priceFilter', 'priceCat', 'priceSup'].forEach(id => $(id).addEventListener('change', () => { keepPrice.clear(); renderPrices(); }));
+  $('priceQ').addEventListener('input', () => { keepPrice.clear(); renderPrices(); });
+  $('priceTable').addEventListener('change', e => {
+    const d = e.target.dataset, code = d.pprice ?? d.psell; if (code === undefined) return;
+    const m = state.master[code] || (state.master[code] = { name: '', price: 0, book: null });
+    const v = e.target.value === '' ? null : Math.max(0, Number(e.target.value) || 0);
+    if (d.pprice !== undefined) m.price = v || 0; else m.sell = v;
+    save(); cloudHook('item', code);
+    keepPrice.add(code); // 入れた商品は、一覧から急に消えないようにする（絞り込みを変えるまで）
+    toast(d.pprice !== undefined ? (v ? `仕入単価 ${yen(v)} を保存しました` : '仕入単価を消しました') : '販売単価を保存しました');
+    setTimeout(() => { const y = window.scrollY; renderPrices(); window.scrollTo(0, y); }, 0);
+  });
   $('countTable').addEventListener('change', e => {
     const sc = e.target.dataset.sup;
     if (sc !== undefined) { setSup(sc, e.target.value); toast(supOfItem(sc) ? `仕入先：${supOfItem(sc)}` : '仕入先を外しました'); setTimeout(renderList, 0); return; }
@@ -2696,7 +2746,7 @@
     };
   })();
 
-  function render() { renderList(); renderTotal(); renderMasterInfo(); renderRecv(); renderOut(); }
+  function render() { renderList(); renderPrices(); renderTotal(); renderMasterInfo(); renderRecv(); renderOut(); }
   load();
   showDraftPhoto();
   setTimeout(() => Cloud.init(), 0);
