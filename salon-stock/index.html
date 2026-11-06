@@ -510,6 +510,8 @@
   // 共有するのは「バーコード・品名・種類」だけ。各ユーザーは自分の登録だけを書き換えられる
   const FB = { apiKey: 'AIzaSyCXXj-QF-MHvDxMqgB5-qU60GBJ0aMYTDM', projectId: 'salon-stock-fbd9b' };
   const FS = `https://firestore.googleapis.com/v1/projects/${FB.projectId}/databases/(default)/documents`;
+  // 公開中のアプリ（https）からだけ共有データベースを使う。テスト用（パソコン上のファイル・localhost）では使わない
+  const SHARE_LIVE = location.protocol === 'https:' && !/^(localhost|127\.)/.test(location.hostname);
   const AUTH_KEY = 'salon-stock-auth';
   const withTimeout = (ms) => { const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; };
   let authP = null;
@@ -538,7 +540,7 @@
   }
   // そのバーコードに、みんなが登録した品名（多い順）
   async function sharedNames(code) {
-    if (!state.opt.share || !isJan(code) || !navigator.onLine) return [];
+    if (!SHARE_LIVE || !state.opt.share || !isJan(code) || !navigator.onLine) return [];
     try {
       const a = await fbAuth();
       const r = await fetch(`${FS}/products/${code}/names?pageSize=100`, { headers: { Authorization: 'Bearer ' + a.idToken }, signal: withTimeout(6000) });
@@ -557,14 +559,14 @@
   }
   // 自分の登録を共有（届かなかったものは次の機会にまとめて送る）
   function shareName(code) {
-    if (!state.opt.share || !isJan(code)) return;
+    if (!SHARE_LIVE || !state.opt.share || !isJan(code)) return;
     const m = state.master[code]; if (!m || !m.name) return;
     state.shareQ = uniq([...(state.shareQ || []), code]); save();
     flushShare();
   }
   let flushing = false;
   async function flushShare() {
-    if (flushing || !state.opt.share || !navigator.onLine || !(state.shareQ || []).length) return;
+    if (!SHARE_LIVE || flushing || !state.opt.share || !navigator.onLine || !(state.shareQ || []).length) return;
     flushing = true;
     try {
       const a = await fbAuth();
