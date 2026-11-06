@@ -77,6 +77,19 @@
   .table-wrap { overflow-x: auto; }
   .qty-input { width: 72px; padding: 6px; text-align: right; }
   .plus { color: var(--ok); } .minus { color: var(--bad); } .zero { color: var(--muted); }
+  .mrow { display: grid; grid-template-columns: 88px 1fr; gap: 2px 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .mrow .mlab { font-size: 14px; line-height: 1.2; }
+  .mrow .mlab small { display: block; color: var(--muted); font-size: 11px; }
+  .mbar { display: flex; height: 14px; border-radius: 4px; overflow: hidden; background: var(--line); }
+  .mbar i { display: block; height: 100%; }
+  .mbar .u { background: var(--accent); }
+  .mbar .d { background: color-mix(in srgb, var(--accent) 45%, var(--bg)); }
+  .mval { grid-column: 2; font-size: 14px; display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
+  .mval b { font-size: 16px; }
+  .mtag { font-size: 11px; padding: 1px 6px; border-radius: 999px; color: #fff; }
+  .mtag.hi { background: var(--bad); } .mtag.lo { background: var(--ok); }
+  .mlegend { display: flex; gap: 12px; font-size: 12px; color: var(--muted); margin: 4px 0 6px; }
+  .mlegend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
   .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 12px; }
   .summary div { background: var(--bg); border-radius: 8px; padding: 10px; }
   .summary b { display: block; font-size: 20px; }
@@ -137,7 +150,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.3</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.4</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -291,6 +304,11 @@
       <div id="supplierSum" style="margin-top:10px"></div>
       <div class="btns"><button id="closeBtn" class="btn primary">棚卸を確定して次の期間へ</button></div>
       <p class="muted">確定すると、今回数えた数が次の期間の「前回の在庫」になり、数えた結果は空になります。未カウントの商品は0個として確定されます。</p>
+    </div>
+    <div class="card money">
+      <h2>月ごとの材料費</h2>
+      <p class="muted">出庫で「材料の使用」を記録すると、その日の月にすぐ入ります（今月の分も途中経過がわかります）。棚卸を確定すると、記録していない使用（棚卸の差）が確定した日の月に入ります。<b>月末に棚卸を確定すると、月ごとの数字が正確になります。</b></p>
+      <div id="monthly"></div>
     </div>
     <div class="card">
       <h2>Excelに書き出す・共有する</h2>
@@ -1583,6 +1601,54 @@
         '</table></div><div class="btns"><button id="undoClose" class="btn">最後の確定を取り消す</button></div>'
       : '<p class="muted">棚卸を確定すると、ここに期間ごとの材料費が並びます。</p>';
     const u = $('undoClose'); if (u) u.onclick = undoClose;
+    renderMonthly();
+  }
+
+  // ---------- 月ごとの材料費 ----------
+  // 記録した使用（出庫の日付の月）＋棚卸の差（確定した日の月）。金額は登録済みの仕入単価で計算
+  const useAmount = (o) => o.lines.reduce((s, l) => s + (Number(l.qty) || 0) * ((state.master[l.code] || {}).price || 0), 0);
+  function monthlyData() {
+    const m = {}, g = (k) => m[k] || (m[k] = { use: 0, diff: 0, buy: 0, sale: 0 });
+    for (const o of state.outs) { const k = (o.date || '').slice(0, 7); if (!k) continue; if (o.type === 'use') g(k).use += useAmount(o); else if (o.type === 'sale') g(k).sale += outAmount(o); }
+    for (const r of state.receipts) { const k = (r.date || '').slice(0, 7); if (k) g(k).buy += slipAmount(r); }
+    state.closes.forEach((c, i) => {
+      const sm = c.summary || {}; if (!c.date || sm.first || sm.material == null) return;
+      const prev = i ? state.closes[i - 1].at : 0;
+      const rec = sm.recUse ?? state.outs.filter(o => o.type === 'use' && o.created > prev && o.created <= c.at).reduce((a, o) => a + useAmount(o), 0);
+      g(c.date.slice(0, 7)).diff += Math.round(sm.material - rec);
+    });
+    return m;
+  }
+  function renderMonthly() {
+    const data = monthlyData(), keys = Object.keys(data).sort();
+    const now = today().slice(0, 7);
+    if (!keys.length) { $('monthly').innerHTML = '<p class="muted">まだ記録がありません。出庫で「材料の使用」を記録するか、入庫を入れると、ここに月ごとに並びます。</p>'; return; }
+    const months = []; // 最初の月から今月まで（最大12か月）
+    for (let [y, mo] = keys[0].split('-').map(Number); ; mo++) {
+      if (mo > 12) { mo = 1; y++; }
+      const k = `${y}-${String(mo).padStart(2, '0')}`; months.push(k);
+      if (k >= now && k >= keys[keys.length - 1]) break;
+    }
+    const list = months.slice(-12).map(k => { const d = data[k] || { use: 0, diff: 0, buy: 0, sale: 0 }; return { k, ...d, total: d.use + d.diff }; });
+    const done = list.filter(x => x.k < now && x.total > 0);
+    const hi = done.length > 1 ? done.reduce((a, b) => b.total > a.total ? b : a) : null;
+    const lo = done.length > 1 ? done.reduce((a, b) => b.total < a.total ? b : a) : null;
+    const max = Math.max(1, ...list.map(x => Math.max(x.total, x.use)));
+    const avg = done.length ? Math.round(done.reduce((s, x) => s + x.total, 0) / done.length) : 0;
+    const lab = (k) => `${Number(k.slice(0, 4))}年${Number(k.slice(5))}月`;
+    const rows = list.slice().reverse().map((x, i, arr) => {
+      const prev = arr[i + 1], diffPrev = prev ? x.total - prev.total : null;
+      const w = (v) => Math.max(0, v) / max * 100;
+      return `<div class="mrow"><div class="mlab">${lab(x.k)}${x.k === now ? '<small>今月（途中）</small>' : ''}</div>
+        <div class="mbar"><i class="u" style="width:${w(x.use)}%"></i><i class="d" style="width:${w(x.diff)}%"></i></div>
+        <div class="mval"><span><b>${yen(x.total)}</b> ${x === hi ? '<span class="mtag hi">いちばん多い</span>' : x === lo ? '<span class="mtag lo">いちばん少ない</span>' : ''}</span>
+        <span class="muted">${diffPrev == null ? '' : '前の月より ' + (diffPrev >= 0 ? '+' : '−') + yen(Math.abs(diffPrev))}</span></div></div>`;
+    }).join('');
+    $('monthly').innerHTML = `<div class="mlegend"><span><i style="background:var(--accent)"></i>記録した使用</span><span><i style="background:color-mix(in srgb, var(--accent) 45%, var(--bg))"></i>棚卸の差</span></div>`
+      + (avg ? `<p class="muted" style="margin:0 0 4px">終わった月の平均：<b>${yen(avg)}</b>／月</p>` : '') + rows
+      + `<details class="rename"><summary>くわしく（表で見る）</summary><div class="table-wrap"><table><tr><th>月</th><th class="num">材料費</th><th class="num">うち記録</th><th class="num">うち棚卸の差</th><th class="num">仕入額</th><th class="num">店販売上</th></tr>`
+      + list.slice().reverse().map(x => `<tr><td style="white-space:nowrap">${Number(x.k.slice(5))}月${x.k === now ? '<br><span class="muted">途中</span>' : ''}</td><td class="num">${yen(x.total)}</td><td class="num">${yen(x.use)}</td><td class="num${x.diff < 0 ? ' minus' : ''}">${yen(x.diff)}</td><td class="num">${yen(x.buy)}</td><td class="num">${yen(x.sale)}</td></tr>`).join('')
+      + '</table></div><p class="muted">仕入額は納品日の月、店販売上（税抜）は販売した日の月で集計しています。</p></details>';
   }
   $('sales').addEventListener('input', e => { state.sales = e.target.value; save(); cloudHook('settings'); renderCost(buildTotal()); });
 
@@ -1593,12 +1659,13 @@
     if (!confirm(`今日（${today()}）の棚卸を確定しますか？` + (uncounted ? `\n未カウントの ${uncounted} 品目は0個として確定されます。` : '') + '\n確定すると数えた結果は空になります。'
       + (merged.length ? '\n読み込んだ他の人のCSVも含めて確定します。' : ''))) return;
     const lc = lastClose(), { material, retail, lost } = costOf(all);
+    const recUse = Math.round(periodOuts().filter(o => o.type === 'use').reduce((s, o) => s + useAmount(o), 0));
     const sales = Number(state.sales) || 0;
     const counts = {}, prices = {};
     for (const t of all) { counts[t.code] = t.counted ? t.qty : 0; prices[t.code] = t.price; }
     const closeObj = { id: 'c' + Date.now().toString(36), date: today(), at: Date.now(), counts, prices,
       saved: JSON.parse(JSON.stringify(state.counts)), // 取り消し用
-      summary: { first: false, material, retail, lost, buy: periodReceipts().reduce((s, r) => s + slipAmount(r), 0), sales, rate: sales ? +(material / sales * 100).toFixed(1) : null } };
+      summary: { first: false, material, retail, lost, recUse, buy: periodReceipts().reduce((s, r) => s + slipAmount(r), 0), sales, rate: sales ? +(material / sales * 100).toFixed(1) : null } };
     state.closes.push(closeObj);
     cloudHook('close', closeObj);
     state.counts = {}; state.history = []; state.sales = ''; merged = [];
