@@ -68,6 +68,9 @@
   .gate-steps span.done { background: color-mix(in srgb, var(--ok) 20%, var(--bg)); color: var(--ok); }
   .bulk-bar { background: var(--card); border: 2px solid var(--accent); border-radius: 12px; padding: 10px 12px; margin-top: 10px; }
   .pchk { width: 22px; height: 22px; accent-color: var(--accent); }
+  .nobar { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+  .nobar .sup-chips button.add { border-style: dashed; color: var(--accent); }
+  .disc-box { margin-top: 8px; padding: 8px; border-radius: 8px; background: var(--bg); }
   .edit-btn { padding: 2px 6px; font-size: 13px; min-height: 0; vertical-align: 1px; }
   .sup-in { margin-top: 4px; padding: 6px 8px; font-size: 14px; max-width: 220px; }
   .row > .narrow { flex: 0 0 96px; }
@@ -161,7 +164,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.11</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.12</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -193,6 +196,7 @@
       </div>
       <button id="addBtn" class="btn primary full" style="margin-top:8px">追加（Enterでも可）</button>
       <p class="muted">同じ商品を読むたびに数量が足されます。箱単位なら数量を「12」などにしてから読んでください。</p>
+      <div class="nobar" data-nobar="count"></div>
       <div id="last" class="last">
         <div class="name" id="lastName"></div>
         <div class="muted" id="lastCode"></div>
@@ -231,6 +235,7 @@
         <input id="rQty" class="narrow" type="number" value="1" aria-label="数量">
       </div>
       <button id="rAddBtn" class="btn primary full" style="margin-top:8px">追加（Enterでも可）</button>
+      <div class="nobar" data-nobar="recv"></div>
       <p class="muted">単価は一度入れると覚えます。次からは自動で入ります。</p>
       <div class="table-wrap"><table id="rTable"></table></div>
       <p id="rTotal" style="font-weight:bold"></p>
@@ -276,7 +281,15 @@
         <input id="oQty" class="narrow" type="number" value="1" aria-label="数量">
       </div>
       <button id="oAddBtn" class="btn primary full" style="margin-top:8px">追加（Enterでも可）</button>
+      <div class="nobar" data-nobar="out"></div>
       <div class="table-wrap" style="margin-top:8px"><table id="oTable"></table></div>
+      <div id="oDiscBox" class="disc-box" style="display:none">
+        <div class="row">
+          <div><label for="oDisc">値引き（円・税抜）</label><input id="oDisc" type="number" inputmode="numeric" placeholder="0"></div>
+          <div><label for="oPay">お会計を税込で〇円にする</label><input id="oPay" type="number" inputmode="numeric" placeholder="例：5000"></div>
+        </div>
+        <p class="muted" style="margin:4px 0 0">1つずつの値引きは、上の表の「単価」を直してください（いつもの売価は変わりません）。全体の値引きや、お会計の端数合わせはここに入れます。右の欄にお会計の金額（税込）を入れると、値引きを自動で計算します。</p>
+      </div>
       <p id="oTotal" style="font-weight:bold"></p>
       <div class="btns">
         <button id="oSave" class="btn primary">記録する</button>
@@ -1952,7 +1965,8 @@
   });
 
   // ========== 出庫（店販の販売・材料としての使用） ==========
-  const outAmount = (o) => o.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.sell) || 0), 0);
+  const outSub = (o) => o.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.sell) || 0), 0);
+  const outAmount = (o) => outSub(o) - (Number(o.disc) || 0); // 値引き・調整を引いた売上（税抜）
   function periodOuts() { const lc = lastClose(); return state.outs.filter(o => !lc || o.created > lc.at); }
   function periodOutQty() {
     const q = { sale: {}, use: {} };
@@ -1988,6 +2002,14 @@
     state.oDraft.type = t; save(); renderOut();
   });
   $('oDate').addEventListener('change', e => { state.oDraft.date = e.target.value; save(); });
+  $('oDisc').addEventListener('change', e => { state.oDraft.disc = Number(e.target.value) || 0; save(); setTimeout(renderOut, 0); });
+  $('oPay').addEventListener('change', e => { // お会計（税込）から値引きを逆算
+    const T = Number(e.target.value); e.target.value = ''; if (!(T >= 0)) return;
+    const d = state.oDraft, sub = outSub(d), n0 = Math.round(T / (1 + TAX));
+    const n = [n0, n0 - 1, n0 + 1].find(n => n + Math.round(n * TAX) === T) ?? n0;
+    d.disc = sub - n; save(); setTimeout(renderOut, 0);
+    toast(d.disc > 0 ? `値引き ${yen(d.disc)} にしました` : d.disc < 0 ? `${yen(-d.disc)} 上乗せしました` : '値引きなしです');
+  });
   $('oCust').addEventListener('input', e => { state.oDraft.customer = e.target.value; save(); });
   document.addEventListener('change', e => {
     const t = e.target, sc = t.dataset && t.dataset.osell, qc = t.dataset && t.dataset.oq;
@@ -1995,9 +2017,9 @@
     const line = state.oDraft.lines.find(l => l.code === (sc ?? qc)); if (!line) return;
     if (sc !== undefined) {
       line.sell = t.value === '' ? '' : Number(t.value);
-      if (line.sell !== '') { const m = state.master[line.code] || (state.master[line.code] = { name: '', price: 0, book: null }); m.sell = line.sell; cloudHook('item', line.code); } // 売価を覚える
+      if (line.sell !== '') { const m = state.master[line.code] || (state.master[line.code] = { name: '', price: 0, book: null }); if (m.sell == null || m.sell === '') { m.sell = line.sell; cloudHook('item', line.code); } } // 売価が未登録のときだけ覚える（値引きでいつもの売価は変えない）
     } else { line.qty = Number(t.value) || 0; if (line.qty <= 0) state.oDraft.lines = state.oDraft.lines.filter(l => l !== line); }
-    save(); renderOut();
+    save(); setTimeout(renderOut, 0); // 入力中の欄を消さないよう、少し後で描き直す
   });
   $('oTable').addEventListener('click', e => {
     const c = e.target.dataset.odel; if (c === undefined) return;
@@ -2011,6 +2033,8 @@
     const sale = d.type !== 'use';
     $('oType').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.otype === d.type));
     $('oCustWrap').style.visibility = sale ? 'visible' : 'hidden';
+    $('oDiscBox').style.display = sale && d.lines.length ? '' : 'none';
+    if (document.activeElement !== $('oDisc')) $('oDisc').value = d.disc ? d.disc : '';
     $('custList').innerHTML = uniq(state.outs.map(o => o.customer).filter(Boolean)).map(x => `<option value="${esc(x)}">`).join('');
     if (!d.lines.length) {
       $('oTable').innerHTML = `<tr><td class="muted">${sale ? '販売した商品' : '材料として使った商品'}のバーコードを読んでください。</td></tr>`;
@@ -2019,13 +2043,13 @@
       $('oTable').innerHTML = `<tr><th>商品</th><th class="num">数</th>${sale ? '<th class="num">単価</th><th class="num">金額</th>' : ''}<th></th></tr>` + d.lines.map(l => `
         <tr><td>${catTag(l.code)}${esc(nameOf(l.code))}<br><span class="muted">${esc(l.code)}</span></td>
         <td class="num"><input class="qty-input" style="width:56px" type="number" value="${esc(l.qty)}" data-oq="${esc(l.code)}"></td>
-        ${sale ? `<td class="num"><input class="qty-input" type="number" inputmode="numeric" placeholder="円" value="${esc(l.sell)}" data-osell="${esc(l.code)}"></td>
+        ${sale ? `<td class="num"><input class="qty-input" type="number" inputmode="numeric" placeholder="円" value="${esc(l.sell)}" data-osell="${esc(l.code)}">${(() => { const r = (state.master[l.code] || {}).sell; return r != null && r !== '' && l.sell !== '' && Number(l.sell) !== Number(r) ? `<br><span class="muted" style="font-size:12px">いつもは ${yen(r)}</span>` : ''; })()}</td>
         <td class="num">${l.sell === '' ? '-' : yen(l.qty * l.sell)}</td>` : ''}
         <td><button class="btn danger" data-odel="${esc(l.code)}" aria-label="削除">✕</button></td></tr>`).join('');
       const qty = d.lines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
       if (sale) {
-        const amt = outAmount(d), tax = Math.round(amt * TAX);
-        $('oTotal').textContent = `${qty} 個 / ${yen(amt)} ＋ 消費税 ${yen(tax)} ＝ ${yen(amt + tax)}`;
+        const sub = outSub(d), disc = Number(d.disc) || 0, amt = sub - disc, tax = Math.round(amt * TAX);
+        $('oTotal').innerHTML = `${qty} 個 / ` + (disc ? `${yen(sub)} ${disc > 0 ? '− 値引き ' + yen(disc) : '＋ 調整 ' + yen(-disc)} ＝ ${yen(amt)} ` : `${yen(amt)} `) + `＋ 消費税 ${yen(tax)} ＝ <span style="font-size:1.2em">${yen(amt + tax)}</span>（税込）`;
       } else $('oTotal').textContent = `${d.lines.length} 品目 / ${qty} 個` + (canMoney() ? `（材料費 ${yen(d.lines.reduce((s, l) => s + l.qty * ((state.master[l.code] || {}).price || 0), 0))}）` : '');
     }
     renderOutHistory();
@@ -2034,7 +2058,7 @@
     const d = state.oDraft;
     if (!d.lines.length) { toast('商品がありません'); return; }
     const o = { id: 'o' + Date.now().toString(36), date: d.date || today(), type: d.type === 'use' ? 'use' : 'sale', customer: d.type === 'use' ? '' : (d.customer || '').trim(),
-      lines: d.lines.map(l => ({ code: l.code, qty: Number(l.qty) || 0, sell: l.sell === '' ? '' : Number(l.sell) })), created: Date.now() };
+      lines: d.lines.map(l => ({ code: l.code, qty: Number(l.qty) || 0, sell: l.sell === '' ? '' : Number(l.sell) })), disc: d.type === 'use' ? 0 : (Number(d.disc) || 0), created: Date.now() };
     state.outs.push(o);
     cloudHook('out', o);
     state.oDraft = { date: today(), type: o.type, customer: '', lines: [] };
@@ -2051,7 +2075,7 @@
     if (!list.length) { $('oHistory').innerHTML = '<p class="muted">まだありません。</p>'; return; }
     const lc = lastClose();
     $('oHistory').innerHTML = list.map(o => `
-      <details class="rename"><summary>${esc(md(o.date))}　${o.type === 'sale' ? '🛍 販売' : '✂️ 材料'}　${o.customer ? esc(o.customer) + '　' : ''}${o.lines.length}品目${o.type === 'sale' ? '　' + yen(outAmount(o)) : ''}${lc && o.created <= lc.at ? '　<span class="muted">確定済み</span>' : ''}</summary>
+      <details class="rename"><summary>${esc(md(o.date))}　${o.type === 'sale' ? '🛍 販売' : '✂️ 材料'}　${o.customer ? esc(o.customer) + '　' : ''}${o.lines.length}品目${o.type === 'sale' ? '　' + yen(outAmount(o)) + (o.disc ? `（${o.disc > 0 ? '値引き' : '調整'} ${yen(Math.abs(o.disc))}）` : '') : ''}${lc && o.created <= lc.at ? '　<span class="muted">確定済み</span>' : ''}</summary>
         <div class="table-wrap"><table>${o.lines.map(l => `<tr><td>${esc(nameOf(l.code))}</td><td class="num">${l.qty}</td>${o.type === 'sale' ? `<td class="num">${l.sell === '' ? '-' : yen(l.sell)}</td>` : ''}</tr>`).join('')}</table></div>
         <div class="btns"><button class="btn danger" data-ocdel="${esc(o.id)}">この出庫を削除</button></div>
       </details>`).join('');
@@ -2105,6 +2129,10 @@
       if (o.type === 'sale') {
         const sell = num(l.sell), amt = sell == null ? null : sell * l.qty, tax = amt == null ? null : Math.round(amt * TAX);
         rows.push([toDate(o.date), l.code, nm(l.code), null, pr, null, null, null, l.qty, sell, amt, tax, amt == null ? null : amt + tax, o.customer || null, null]);
+        if (l === o.lines[o.lines.length - 1] && Number(o.disc)) { // 値引き・調整は1行で（消費税は全体で計算した額に合わせる）
+          const sub = outSub(o), lineTax = o.lines.reduce((s, x) => s + Math.round((num(x.sell) || 0) * x.qty * TAX), 0), d = -Number(o.disc), dt = Math.round((sub + d) * TAX) - lineTax;
+          rows.push([toDate(o.date), null, d < 0 ? '値引き' : '調整（上乗せ）', null, null, null, null, null, null, null, d, dt, d + dt, o.customer || null, null]);
+        }
       } else {
         rows.push([toDate(o.date), l.code, nm(l.code), null, pr, null, l.qty, pr == null ? null : pr * l.qty, null, null, null, null, null, null, null]);
       }
@@ -2460,7 +2488,7 @@
         enqueue(w);
       },
       out(o) {
-        const d = mine({ kind: 'out', date: o.date, type: o.type, customer: o.customer, lines: o.lines.map(l => ({ c: l.code, q: l.qty, s: l.sell === '' ? null : l.sell })), ts: o.created, deleted: false });
+        const d = mine({ kind: 'out', date: o.date, type: o.type, customer: o.customer, lines: o.lines.map(l => ({ c: l.code, q: l.qty, s: l.sell === '' ? null : l.sell })), disc: Number(o.disc) || 0, ts: o.created, deleted: false });
         cc.events[o.id] = { id: o.id, ...d, at: Date.now(), pending: true };
         enqueue([{ path: `salons/${salon}/events/${o.id}`, data: d }]);
       },
@@ -2525,7 +2553,7 @@
         // 単価が入っていない入庫（記録だけのスタッフが入れたもの）は、登録済みの仕入単価で計算する
         return { id: e.id, date: e.date, supplier: e.supplier || '', slip: e.slip || '', lines: (e.lines || []).map(l => ({ code: l.c, qty: l.q, price: p[l.c] ?? ((cc.costs[l.c] || {}).price || '') })), photo: photoOf[e.id] || '', created: e.ts, by: e.by || '' };
       });
-      state.outs = evs.filter(e => e.kind === 'out').map(e => ({ id: e.id, date: e.date, type: e.type, customer: e.customer || '', lines: (e.lines || []).map(l => ({ code: l.c, qty: l.q, sell: l.s ?? '' })), created: e.ts }));
+      state.outs = evs.filter(e => e.kind === 'out').map(e => ({ id: e.id, date: e.date, type: e.type, customer: e.customer || '', lines: (e.lines || []).map(l => ({ code: l.c, qty: l.q, sell: l.s ?? '' })), disc: Number(e.disc) || 0, created: e.ts }));
       const st = cc.settings.main || {};
       if (money()) { state.suppliers = st.suppliers || {}; state.sales = st.sales || ''; state.monthSales = st.monthSales || {}; }
       save();
@@ -2653,7 +2681,7 @@
         const p = {}; for (const l of r.lines) if (l.price !== '' && l.price != null) p[l.code] = l.price;
         w.push({ path: `salons/${salon}/recvPrices/${r.id}`, data: { p } });
       }
-      for (const o of b.outs || []) w.push({ path: `salons/${salon}/events/${o.id}`, data: { kind: 'out', date: o.date, type: o.type, customer: o.customer || '', lines: o.lines.map(l => ({ c: l.code, q: l.qty, s: l.sell === '' ? null : l.sell })), ts: o.created, deleted: false, by: user.uid } });
+      for (const o of b.outs || []) w.push({ path: `salons/${salon}/events/${o.id}`, data: { kind: 'out', date: o.date, type: o.type, customer: o.customer || '', lines: o.lines.map(l => ({ c: l.code, q: l.qty, s: l.sell === '' ? null : l.sell })), disc: Number(o.disc) || 0, ts: o.created, deleted: false, by: user.uid } });
       let lastAt = 0;
       for (const c of b.closes || []) {
         const id = c.id || ('c' + c.at.toString(36));
@@ -2832,7 +2860,38 @@
     };
   })();
 
-  function render() { renderList(); renderPrices(); renderTotal(); renderMasterInfo(); renderRecv(); renderOut(); }
+  // ========== バーコードの無い商品 ==========
+  const noBarItems = () => Object.keys(state.master).filter(c => !isJan(c) && (state.master[c].name || '').trim()).sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'ja'));
+  function renderNoBar() {
+    const list = noBarItems();
+    document.querySelectorAll('.nobar').forEach(el => {
+      const mode = el.dataset.nobar;
+      el.innerHTML = `<b style="font-size:14px">🏷 バーコードの無い商品</b><span class="muted" style="font-size:13px">　押すと上の数量だけ${mode === 'count' ? '数えます' : '追加します'}</span>
+        <div class="sup-chips">${list.map(c => `<button type="button" data-nbadd="${esc(c)}">${esc(nameOf(c))}${mode === 'count' && state.counts[c] ? `（${state.counts[c].qty}）` : ''}</button>`).join('')}
+        <button type="button" class="add" data-nbnew>＋ 登録する</button></div>`;
+    });
+  }
+  function noBarAdd(mode, code) {
+    if (mode === 'recv') addRecv(code, $('rQty').value);
+    else if (mode === 'out') addOut(code, $('oQty').value);
+    else addCount(code, $('qty').value);
+    renderNoBar();
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-nbadd],[data-nbnew]'); if (!b) return;
+    const mode = b.closest('[data-nobar]').dataset.nobar;
+    if (b.dataset.nbadd !== undefined) { noBarAdd(mode, b.dataset.nbadd); return; }
+    const name = (prompt('バーコードの無い商品の名前（例：ホイル 12cm）') || '').trim(); if (!name) return;
+    let code = noBarItems().find(c => nameOf(c) === name);
+    if (!code) {
+      code = 'NB' + Date.now().toString(36).toUpperCase(); // バーコードの代わりの番号（お店の中だけで使う）
+      state.master[code] = { name, price: 0, book: null };
+      save(); cloudHook('item', code);
+    }
+    noBarAdd(mode, code); toast(`「${name}」を登録しました`);
+  });
+
+  function render() { renderList(); renderPrices(); renderTotal(); renderMasterInfo(); renderRecv(); renderOut(); renderNoBar(); }
   load();
   showDraftPhoto();
   setTimeout(() => Cloud.init(), 0);
