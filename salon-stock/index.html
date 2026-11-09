@@ -2,6 +2,8 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
+<script>/* LINEの中で開いたときは、Safari・Chromeで開き直す（LINEの中ではGoogleログインができないため） */
+if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(location.search)) location.replace(location.pathname + (location.search ? location.search + '&' : '?') + 'openExternalBrowser=1' + location.hash);</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>サロンストック</title>
 <meta name="description" content="美容室・理容室のための、バーコードで数える棚卸アプリ">
@@ -164,7 +166,7 @@
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.12</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.13</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -401,6 +403,10 @@
       <h2>☁️ お店のクラウド</h2>
       <div id="cloudOut">
         <p class="muted">データはお店ごとのクラウドに保存され、オーナーとスタッフで共有できます。スマホをなくしても消えません。</p>
+        <div id="cInApp" style="display:none;margin:8px 0;padding:10px;border-radius:8px;background:#fff4d6;color:#5a4300">
+          <b>⚠️ アプリの中のブラウザで開いています</b><br>ここでは<b>Googleログインができません</b>。右上か右下の「⋮」「…」や共有ボタンから、<b>「Safariで開く」</b>（Androidは「Chromeで開く」）を選んでください。<br>または、下のメールアドレスで登録すれば、このままでも使えます。
+          <div class="btns" style="margin-top:6px"><button id="cCopyUrl" class="btn">このページのURLをコピー</button></div>
+        </div>
         <div class="btns"><button id="cGoogle" class="btn primary" style="background:#fff;color:#222;border:1px solid #ccc">
           <svg width="18" height="18" viewBox="0 0 48 48" style="vertical-align:-3px;margin-right:6px" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.2l7.9 6.2C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.7c4.3-4 6.9-9.9 6.9-17.1z"/><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.2C1 16.6 0 20.2 0 24s1 7.4 2.7 10.8l7.9-6.2z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.2 0-11.5-4.1-13.4-9.9l-7.9 6.2C6.6 42.6 14.6 48 24 48z"/></svg>Googleでログイン</button></div>
         <p class="muted" style="text-align:center;margin:8px 0">または、メールアドレスで</p>
@@ -2758,7 +2764,15 @@
       } catch (e) { $('cMembers').textContent = '読み込めませんでした：' + e.message; }
     }
     const busy = async (btn, fn) => { btn.disabled = true; $('cMsg').textContent = ''; try { await fn(); } catch (e) { $('cMsg').textContent = e.message; } finally { btn.disabled = false; } };
+    // LINE・Instagram・Googleアプリなどの中のブラウザ（Googleがログインを許可していない／途中で情報が消える）
+    const IN_APP = /( Line\/|FBAN|FBAV|FB_IAB|Instagram|KAKAOTALK|GSA\/|Twitter|MicroMessenger|YJApp|TikTok|musical_ly|Bytedance)/i.test(navigator.userAgent);
+    if (IN_APP) $('cInApp').style.display = '';
+    $('cCopyUrl').addEventListener('click', async () => {
+      const u = location.origin + location.pathname;
+      try { await navigator.clipboard.writeText(u); toast('コピーしました。Safari（Chrome）に貼り付けて開いてください'); } catch (e) { prompt('このURLをコピーして、Safari（Chrome）で開いてください', u); }
+    });
     $('cGoogle').addEventListener('click', e => busy(e.currentTarget, async () => {
+      if (IN_APP) throw new Error('このブラウザではGoogleログインができません。上の説明のとおりSafari（Chrome）で開くか、メールアドレスで登録してください');
       await googleLogin(); toast('ログインしました'); await afterLogin();
     }));
     $('cGoogle').addEventListener('pointerdown', preloadGoogle);

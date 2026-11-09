@@ -2,6 +2,8 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
+<script>/* LINEの中で開いたときは、Safari・Chromeで開き直す（LINEの中ではGoogleログインができないため） */
+if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(location.search)) location.replace(location.pathname + (location.search ? location.search + '&' : '?') + 'openExternalBrowser=1' + location.hash);</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>サロンストックの使い方</title>
 <meta name="theme-color" content="#7a4bd6">
