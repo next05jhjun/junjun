@@ -73,6 +73,23 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   .nobar { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
   .nobar .sup-chips button.add { border-style: dashed; color: var(--accent); }
   .disc-box { margin-top: 8px; padding: 8px; border-radius: 8px; background: var(--bg); }
+  .pdf-box { position: fixed; left: -10000px; top: 0; }
+  .pdf-page { box-sizing: border-box; position: relative; background: #fff; color: #222; font-size: 12px; line-height: 1.45; font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  .pdf-page table { width: 100%; border-collapse: collapse; margin: 2px 0 6px; }
+  .pdf-page th { background: #e9edf5; font-weight: bold; text-align: left; padding: 3px 6px; border: 1px solid #c9d0dc; }
+  .pdf-page td { padding: 3px 6px; border: 1px solid #dde2ea; }
+  .pdf-page .n { text-align: right; white-space: nowrap; }
+  .pdf-page th.n { width: 1%; }
+  .pdf-page .p-title { font-size: 20px; font-weight: bold; }
+  .pdf-page .p-sub, .pdf-page .p-m { color: #666; font-size: 11px; }
+  .pdf-page .p-sum { display: flex; gap: 8px; margin: 10px 0; }
+  .pdf-page .p-sum div { flex: 1; border: 1px solid #c9d0dc; border-radius: 6px; padding: 6px 8px; }
+  .pdf-page .p-sum span { display: block; color: #666; font-size: 11px; }
+  .pdf-page .p-sum b { font-size: 16px; }
+  .pdf-page .p-h { font-size: 15px; font-weight: bold; margin: 14px 0 4px; padding-bottom: 2px; border-bottom: 2px solid #4472c4; }
+  .pdf-page .p-g { font-weight: bold; margin: 8px 0 2px; }
+  .pdf-page .p-total { text-align: right; font-weight: bold; font-size: 14px; margin: 6px 0; }
+  .pdf-page .p-foot { position: absolute; bottom: 20px; left: 0; right: 0; text-align: center; color: #888; font-size: 10px; }
   .edit-btn { padding: 2px 6px; font-size: 13px; min-height: 0; vertical-align: 1px; }
   .sup-in { margin-top: 4px; padding: 6px 8px; font-size: 14px; max-width: 220px; }
   .row > .narrow { flex: 0 0 96px; }
@@ -166,7 +183,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.13</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.14</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -359,11 +376,16 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       <div id="monthly"></div>
     </div>
     <div class="card">
-      <h2>Excelに書き出す・共有する</h2>
+      <h2>Excel・PDFに書き出す・共有する</h2>
       <p class="muted">「仕入・出庫管理」「在庫管理」「月ごとの材料費」のシートが入ったExcelファイルを作ります。今期（前回の確定から今日まで）の入庫・材料使用・店販の出庫と、仕入先ごとの在庫、月ごとの材料費・原価率（最大24か月）が入ります。</p>
       <div class="btns">
         <button id="xlsxShare" class="btn primary">📤 共有（LINE・メールなど）</button>
         <button id="xlsxSave" class="btn">💾 ファイルに保存</button>
+      </div>
+      <p class="muted" style="margin:10px 0 0">PDF：棚卸表（仕入先ごとの数と金額）・仕入出庫の記録・月ごとの材料費を、A4の紙の形にします。印刷や、税理士さんに見てもらうときに。</p>
+      <div class="btns">
+        <button id="pdfShare" class="btn primary">📄 PDFで共有</button>
+        <button id="pdfSave" class="btn">💾 PDFを保存</button>
       </div>
       <p class="muted" id="xlsxInfo"></p>
     </div>
@@ -2268,6 +2290,102 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       try { await navigator.share({ files: [file], title: file.name, text: 'サロンストックの仕入・出庫管理／在庫管理' }); }
       catch (e) { if (e.name !== 'AbortError') saveFile(file); }
     } else { saveFile(file); toast('共有に対応していないため、ファイルとして保存しました'); }
+  });
+  // ========== PDFに書き出す（画面と同じ文字で1ページずつ画像にして、A4のPDFにする） ==========
+  async function loadPdfLibs() {
+    if (!window.html2canvas) { try { await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'); } catch (e) { await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'); } }
+    if (!window.jspdf) { try { await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'); } catch (e) { await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'); } }
+  }
+  function pdfBlocks() {
+    const money = canMoney(), lc = lastClose(), all = buildTotal(), { rows } = buildRows();
+    const y = (n) => n == null || n === '' ? '' : yen(n), q = (n) => n == null || n === '' ? '' : Number(n).toLocaleString('ja-JP');
+    const shop = ($('salonChip') && $('salonChip').textContent.trim()) || '';
+    const B = [];
+    const sumBy = (i) => rows.reduce((s, r) => s + (Number(r[i]) || 0), 0);
+    const stockTotal = all.reduce((s, t) => s + (t.amount || 0), 0);
+    B.push({ html: `<div class="p-title">棚卸表・仕入出庫の記録</div><div class="p-sub">${esc(shop ? shop + '　' : '')}期間：${lc ? esc(lc.date) + ' の確定より後' : 'はじめから'} 〜 ${esc(today())}　（作成：${esc(today())}）</div>` });
+    if (money) B.push({ html: `<div class="p-sum"><div><span>在庫金額（仕入値）</span><b>${yen(stockTotal)}</b></div><div><span>仕入額</span><b>${yen(sumBy(5))}</b></div><div><span>記録した材料費</span><b>${yen(sumBy(7))}</b></div><div><span>店販売上（税込）</span><b>${yen(sumBy(12))}</b></div></div>` });
+    // 棚卸表（仕入先ごと）
+    const sup = supplierOf(), groups = {};
+    for (const t of all) { if (!t.counted && !(t.book > 0)) continue; const g = sup[t.code] || '仕入先なし'; (groups[g] = groups[g] || []).push(t); }
+    const names = Object.keys(groups).sort((a, b) => (a === '仕入先なし') - (b === '仕入先なし') || a.localeCompare(b, 'ja'));
+    B.push({ html: '<div class="p-h">棚卸表（仕入先ごと）</div>' });
+    const sCols = money ? ['品名', '数', '仕入単価', '金額'] : ['品名', '数'];
+    for (const g of names) {
+      const list = groups[g].sort((a, b) => a.name.localeCompare(b.name, 'ja', { numeric: true }));
+      const sub = list.reduce((s, t) => s + (t.amount || 0), 0);
+      B.push({ html: `<div class="p-g">${esc(g)}（${list.length}品目${money ? '・' + yen(sub) : ''}）</div>` });
+      B.push({ cols: sCols, num: [1, 2, 3], rows: list.map(t => { const n = t.counted ? t.qty : Math.max(0, t.book || 0); const r = [esc(t.name) + (t.counted ? '' : ' <span class="p-m">（数えていないため帳簿の数）</span>'), q(n)]; if (money) r.push(y(t.price || null), y(t.amount)); return r; }) });
+    }
+    if (money) B.push({ html: `<div class="p-total">在庫金額の合計　${yen(stockTotal)}</div>` });
+    if (!names.length) B.push({ html: '<p class="p-m">まだ数えた商品がありません。</p>' });
+    // 仕入・出庫の記録
+    const kind = (r) => r[2] === '値引き' || r[2] === '調整（上乗せ）' ? r[2] : r[3] != null ? '入庫' : r[6] != null ? (r[13] === '（棚卸の差から）' ? '材料（棚卸の差）' : '材料') : '販売';
+    const fd = (d) => d instanceof Date ? `${d.getMonth() + 1}/${d.getDate()}` : '';
+    B.push({ html: '<div class="p-h">仕入・出庫の記録</div>' });
+    if (!rows.length) B.push({ html: '<p class="p-m">この期間の記録はありません。</p>' });
+    else B.push({ cols: money ? ['日付', '区分', '品名', '数', '金額', '仕入先・お客様'] : ['日付', '区分', '品名', '数', '仕入先・お客様'], num: money ? [3, 4] : [3],
+      rows: rows.map(r => { const k = kind(r), n = r[3] ?? r[6] ?? r[8]; const amt = k === '入庫' ? r[5] : k.startsWith('材料') ? r[7] : r[12];
+        const who = k === '入庫' ? r[14] : k === '材料（棚卸の差）' ? '' : r[13];
+        const x = [fd(r[0]), k, esc(r[2] || ''), q(n)]; if (money) x.push(y(amt)); x.push(esc(who || '')); return x; }) });
+    // 月ごとの材料費
+    const mrows = money ? monthRows(24) : [];
+    if (mrows.length) {
+      B.push({ html: '<div class="p-h">月ごとの材料費</div>' });
+      B.push({ cols: ['月', '材料費', '仕入額', '店販売上（税抜）', '技術売上', '原価率'], num: [1, 2, 3, 4, 5],
+        rows: mrows.map(x => [`${Number(x.k.slice(0, 4))}年${Number(x.k.slice(5))}月`, yen(x.total), yen(x.buy), yen(x.sale), x.tech ? yen(x.tech) : '', x.rate == null ? '' : x.rate.toFixed(1) + '%']) });
+    }
+    return B;
+  }
+  function pdfPages(B) {
+    const W = 794, H = 1123, PAD = 40, LIMIT = H - PAD * 2 - 24;
+    const box = document.createElement('div'); box.className = 'pdf-box'; document.body.appendChild(box);
+    const pages = []; let page, inner;
+    const newPage = () => { page = document.createElement('div'); page.className = 'pdf-page'; page.style.cssText = `width:${W}px;height:${H}px;padding:${PAD}px`; inner = document.createElement('div'); page.appendChild(inner); box.appendChild(page); pages.push(page); };
+    const over = () => inner.offsetHeight > LIMIT;
+    newPage();
+    for (const b of B) {
+      if (b.html !== undefined) {
+        const d = document.createElement('div'); d.innerHTML = b.html; inner.appendChild(d);
+        if (over() && inner.children.length > 1) { d.remove(); newPage(); inner.appendChild(d); }
+        continue;
+      }
+      const mk = () => { const t = document.createElement('table'); t.innerHTML = '<tr>' + b.cols.map((c, i) => `<th${b.num.includes(i) ? ' class="n"' : ''}>${esc(c)}</th>`).join('') + '</tr>'; inner.appendChild(t); return t; };
+      let tbl = mk();
+      for (const r of b.rows) {
+        const tr = document.createElement('tr'); tr.innerHTML = r.map((c, i) => `<td${b.num.includes(i) ? ' class="n"' : ''}>${c}</td>`).join('');
+        tbl.appendChild(tr);
+        if (over()) { tr.remove(); if (tbl.rows.length === 1) tbl.remove(); newPage(); tbl = mk(); tbl.appendChild(tr); }
+      }
+    }
+    pages.forEach((p, i) => { const f = document.createElement('div'); f.className = 'p-foot'; f.textContent = `サロンストック　${i + 1} / ${pages.length}`; p.appendChild(f); });
+    return { box, pages };
+  }
+  async function makePdf() {
+    await loadPdfLibs();
+    const { box, pages } = pdfPages(pdfBlocks());
+    try {
+      const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
+      for (let i = 0; i < pages.length; i++) {
+        const cv = await window.html2canvas(pages[i], { scale: 2, backgroundColor: '#ffffff', logging: false });
+        if (i) doc.addPage();
+        doc.addImage(cv.toDataURL('image/jpeg', 0.85), 'JPEG', 0, 0, 210, 297);
+      }
+      $('xlsxInfo').textContent = `PDF（${pages.length}ページ）を作りました。`;
+      return new File([doc.output('blob')], `サロンストック_${today().replace(/-/g, '')}.pdf`, { type: 'application/pdf' });
+    } finally { box.remove(); }
+  }
+  async function shareFile(make, label) {
+    let file;
+    try { $('xlsxInfo').textContent = `${label}を作っています…`; file = await make(); } catch (e) { console.error(e); $('xlsxInfo').textContent = ''; toast(`${label}を作れませんでした。通信を確認してください`); return; }
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: file.name, text: 'サロンストックの棚卸表・仕入出庫の記録' }); }
+      catch (e) { if (e.name !== 'AbortError') saveFile(file); }
+    } else { saveFile(file); toast('共有に対応していないため、ファイルとして保存しました'); }
+  }
+  $('pdfShare').addEventListener('click', () => shareFile(makePdf, 'PDF'));
+  $('pdfSave').addEventListener('click', async () => {
+    try { $('xlsxInfo').textContent = 'PDFを作っています…'; saveFile(await makePdf()); } catch (e) { console.error(e); toast('PDFを作れませんでした。通信を確認してください'); }
   });
   // ==================== お店のクラウド（Firebase：メールログイン＋Firestore） ====================
   // データの置き場所：salons/{お店}/… （ルールは firestore.rules）
