@@ -177,13 +177,18 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   .crop .btns button { flex: 1; }
   .crop button:disabled { opacity: .45; }
   body.record-only .money, body.record-only nav button[data-tab="total"] { display: none !important; }
-  .salon-chip { font-size: 12px; font-weight: normal; color: var(--accent); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; max-width: 32vw; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .salon-chip::after { content: ' ▾'; }
+  .salon-menu { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; padding: 70px 16px 16px; }
+  .salon-menu > div { background: var(--card); color: var(--text); border-radius: 12px; padding: 12px; width: 100%; max-width: 420px; box-shadow: 0 8px 30px rgba(0,0,0,.25); }
+  .salon-menu button { display: block; width: 100%; text-align: left; margin-top: 6px; }
+  .salon-menu button.on { border-color: var(--accent); color: var(--accent); font-weight: bold; }
+  .salon-chip { cursor: pointer; font-size: 12px; font-weight: normal; color: var(--accent); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; max-width: 32vw; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ocr-status { font-size: 14px; color: var(--muted); margin-top: 4px; min-height: 1em; }
 </style>
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.14</small><span class="salon-chip" id="salonChip" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.15</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -2919,6 +2924,24 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       fillUI(); toast('ログアウトしました');
     });
     $('cSalon').addEventListener('change', e => { if (e.target.value) chooseSalon(e.target.value); });
+    // 見出しのお店の名前を押すと、お店を切り替える
+    $('salonChip').addEventListener('click', async () => {
+      if (!user || document.querySelector('.salon-menu')) return;
+      const m = document.createElement('div'); m.className = 'salon-menu';
+      m.innerHTML = '<div><b>お店を切り替える</b><p class="muted" style="margin:4px 0">読み込み中…</p></div>'; document.body.appendChild(m);
+      const close = () => m.remove();
+      m.addEventListener('click', e => { if (e.target === m) close(); });
+      let list = {}; try { list = await mySalons(); } catch (e) {}
+      m.firstElementChild.innerHTML = '<b>お店を切り替える</b>'
+        + Object.entries(list).map(([id, n]) => `<button class="btn${id === salon ? ' on' : ''}" data-sw="${esc(id)}">${id === salon ? '✓ ' : ''}${esc(n)}</button>`).join('')
+        + '<button class="btn" data-sw-new>＋ お店を作る・参加する</button><button class="btn" data-sw-close>閉じる</button>';
+      m.firstElementChild.addEventListener('click', async e => {
+        const b = e.target.closest('button'); if (!b) return;
+        if (b.dataset.sw !== undefined) { close(); if (b.dataset.sw !== salon) { toast(`「${list[b.dataset.sw]}」に切り替えています…`); await chooseSalon(b.dataset.sw); render(); toast(`「${list[b.dataset.sw]}」に切り替えました`); } }
+        else if (b.dataset.swNew !== undefined) { close(); document.querySelector('nav button[data-tab="setting"]').click(); setTimeout(() => $('cloudCard').scrollIntoView({ behavior: 'smooth' }), 50); }
+        else close();
+      });
+    });
     $('cSyncNow').addEventListener('click', e => busy(e.target, async () => { await flush().catch(() => {}); await pull(); fillUI(); toast('同期しました'); }));
     $('cCreate').addEventListener('click', e => busy(e.target, async () => {
       const name = $('cNewName').value.trim(); if (!name) throw new Error('お店の名前を入れてください');
