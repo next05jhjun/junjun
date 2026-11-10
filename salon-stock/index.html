@@ -191,7 +191,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.18</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.19</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -349,6 +349,12 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       <p id="priceInfo" style="font-weight:bold;margin:6px 0"></p>
       <div id="nameFind"></div>
       <div id="tidyBox"></div>
+      <details class="rename"><summary>📗 品名・種類・仕入先をExcelでまとめて直す</summary>
+        <p class="muted">① 書き出したExcelで、品名・種類・仕入先・単価を直して保存 → ② そのファイルを読み込むと、まとめて直ります。空欄のところは今のままです。バーコードの列は変えないでください。</p>
+        <div class="btns"><button id="mxOut" class="btn">① 商品の一覧をExcelで書き出す</button>
+          <label class="btn" style="margin:0">② 直したExcelを読み込む<input type="file" id="mxIn" accept=".xlsx" style="display:none"></label></div>
+        <p class="muted" id="mxInfo"></p>
+      </details>
       <div class="row">
         <select id="priceFilter" aria-label="表示する商品"><option value="none">単価がまだだけ</option><option value="all">すべて</option></select>
         <select id="priceSup" aria-label="仕入先で絞り込む"></select>
@@ -686,7 +692,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     const stock = c ? c.qty : Math.max(0, t.book || 0);
     if (!confirm(`「${nameOf(code)}」を削除しますか？` + (stock ? `\n在庫が ${stock} 個あります。在庫金額からも外れます。` : '') + (c ? '\n数えた数も消します。' : '') + '\n（入庫・出庫の記録は残ります。もう一度バーコードを読むと元に戻ります）')) return;
     if (c) { for (const [pl, q] of Object.entries(c.places)) if (q) cloudHook('count', code, -q, pl); delete state.counts[code]; }
-    state.master[code] = Object.assign({ name: nameOf(code), price: 0, book: null }, state.master[code], { off: true });
+    state.master[code] = Object.assign({ name: (state.lookup[code] || {}).name || '', price: 0, book: null }, state.master[code], { off: true });
     selPrice.delete(code); keepPrice.delete(code);
     save(); cloudHook('item', code); render(); toast('削除しました');
   });
@@ -1389,7 +1395,8 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       : '<tr><th></th><th>商品</th><th class="num">仕入単価</th><th class="num">販売単価</th></tr>' + rows.map(t => `<tr>
         <td><input type="checkbox" class="pchk" data-psel="${esc(t.code)}" ${selPrice.has(t.code) ? 'checked' : ''} aria-label="選ぶ"></td>
         <td>${t.cat ? `<span class="cat-tag">${esc(t.cat)}</span>` : ''}${esc(t.name)} <button class="btn edit-btn" data-editname="${esc(t.code)}" aria-label="名前を直す">✏️</button> <button class="btn edit-btn" data-delitem="${esc(t.code)}" aria-label="商品を削除">🗑</button><br><span class="muted">${esc(t.code)}</span>
-          <div class="p-edit"><input class="sup-in" list="supList2" placeholder="仕入先" value="${esc(supOfItem(t.code))}" data-psup="${esc(t.code)}" aria-label="仕入先">
+          <div class="p-edit"><select class="sup-in" data-pcat="${esc(t.code)}" aria-label="種類"><option value="">種類なし</option>${uniq([...CATS, t.cat].filter(Boolean)).map(c => `<option${c === t.cat ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>
+          <input class="sup-in" list="supList2" placeholder="仕入先" value="${esc(supOfItem(t.code))}" data-psup="${esc(t.code)}" aria-label="仕入先">
           <label class="muted">在庫 <input class="qty-input" style="width:64px" type="number" inputmode="numeric" min="0" value="${t.counted ? t.qty : Math.max(0, t.book ?? 0)}" data-pqty="${esc(t.code)}" aria-label="在庫の数"> 個</label></div></td>
         <td class="num"><input class="qty-input" style="width:90px" type="number" inputmode="numeric" min="0" placeholder="円" value="${t.price || ''}" data-pprice="${esc(t.code)}" aria-label="仕入単価"></td>
         <td class="num">${t.cat === RETAIL || t.sell != null ? `<input class="qty-input" style="width:90px" type="number" inputmode="numeric" min="0" placeholder="円" value="${t.sell ?? ''}" data-psell="${esc(t.code)}" aria-label="販売単価">` : '<span class="muted">-</span>'}</td></tr>`).join('');
@@ -1415,6 +1422,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   $('priceQ').addEventListener('input', () => { keepPrice.clear(); renderPrices(); });
   $('priceTable').addEventListener('change', e => {
     const d = e.target.dataset;
+    if (d.pcat !== undefined) { const m = state.master[d.pcat] || (state.master[d.pcat] = { name: '', price: 0, book: null }); m.cat = e.target.value; save(); cloudHook('item', d.pcat); keepPrice.add(d.pcat); toast(m.cat ? `種類：${m.cat}` : '種類を外しました'); setTimeout(() => { const y = window.scrollY; render(); window.scrollTo(0, y); }, 0); return; }
     if (d.psup !== undefined) { setSup(d.psup, e.target.value); keepPrice.add(d.psup); toast(supOfItem(d.psup) ? `仕入先：${supOfItem(d.psup)}` : '仕入先を外しました'); setTimeout(() => { const y = window.scrollY; render(); window.scrollTo(0, y); }, 0); return; }
     if (d.pqty !== undefined) { const v = Number(e.target.value); if (e.target.value === '' || !Number.isFinite(v) || v < 0) return; setCountQty(d.pqty, v); keepPrice.add(d.pqty); toast(`在庫を ${v} 個にしました`); setTimeout(() => { const y = window.scrollY; render(); window.scrollTo(0, y); }, 0); return; }
     const code = d.pprice ?? d.psell; if (code === undefined) return;
@@ -1525,12 +1533,12 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       const code = String(r[0] ?? '').trim(); if (!code) continue;
       const old = state.master[code] || {};
       // 既に登録済みの品名・種類は、CSVが空欄なら残す
-      state.master[code] = {
+      state.master[code] = Object.assign({}, old, { // 仕入先・販売単価・発注点などは残す
         name: (r[1] || '').trim() || old.name || '',
-        price: num(r[2]),
-        book: r[3] === undefined || String(r[3]).trim() === '' ? null : num(r[3]),
+        price: String(r[2] ?? '').trim() === '' ? (old.price || 0) : num(r[2]),
+        book: r[3] === undefined || String(r[3]).trim() === '' ? (old.book ?? null) : num(r[3]),
         cat: (r[4] || '').trim() || old.cat || '',
-      };
+      });
       n++;
     }
     save(); renderMasterInfo(); cloudHook('items', Object.keys(state.master));
@@ -2476,6 +2484,63 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   $('pdfSave').addEventListener('click', async () => {
     try { $('xlsxInfo').textContent = 'PDFを作っています…'; saveFile(await makePdf()); } catch (e) { console.error(e); toast('PDFを作れませんでした。通信を確認してください'); }
   });
+
+  // ========== 商品の一覧をExcelで直す（書き出し → 直す → 読み込み） ==========
+  const MX_COLS = () => ['バーコード', '品名', '種類', '仕入先'].concat(canMoney() ? ['仕入単価', '販売単価'] : []);
+  $('mxOut').addEventListener('click', async () => {
+    try {
+      await loadExcelJS();
+      const wb = new window.ExcelJS.Workbook(), ws = wb.addWorksheet('商品');
+      const cols = MX_COLS(); ws.addRow(cols);
+      const items = priceItems().sort((a, b) => (a.cat || '').localeCompare(b.cat || '', 'ja') || a.name.localeCompare(b.name, 'ja', { numeric: true }));
+      for (const t of items) {
+        const m = state.master[t.code] || {};
+        const r = ws.addRow([String(t.code), m.name || '', m.cat || '', m.sup || ''].concat(canMoney() ? [m.price || null, m.sell ?? null] : []));
+        r.getCell(1).numFmt = '@'; // バーコードは文字として（Excelで数字に化けないように）
+      }
+      ws.getColumn(1).numFmt = '@';
+      [16, 46, 16, 18, 11, 11].slice(0, cols.length).forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      ws.getRow(1).font = { bold: true }; ws.views = [{ state: 'frozen', ySplit: 1 }];
+      // 種類は選べるように
+      for (let r = 2; r <= items.length + 1; r++) ws.getCell(r, 3).dataValidation = { type: 'list', allowBlank: true, formulae: ['"' + CATS.join(',') + '"'] };
+      const buf = await wb.xlsx.writeBuffer();
+      const file = new File([buf], `サロンストック_商品一覧_${today().replace(/-/g, '')}.xlsx`, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: file.name }); } catch (e) { if (e.name !== 'AbortError') saveFile(file); } }
+      else saveFile(file);
+      $('mxInfo').textContent = `${items.length} 品目を書き出しました。`;
+    } catch (e) { console.error(e); toast('Excelを作れませんでした。通信を確認してください'); }
+  });
+  $('mxIn').addEventListener('change', async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    try {
+      await loadExcelJS();
+      const wb = new window.ExcelJS.Workbook(); await wb.xlsx.load(await f.arrayBuffer());
+      const ws = wb.worksheets[0];
+      const txt = (v) => { if (v == null) return ''; if (typeof v === 'object') v = v.text ?? v.result ?? (v.richText ? v.richText.map(x => x.text).join('') : ''); return String(v ?? '').trim(); };
+      const head = []; ws.getRow(1).eachCell({ includeEmpty: true }, (c, n) => { head[n] = txt(c.value); });
+      const col = (name) => head.indexOf(name);
+      if (col('バーコード') < 1 || col('品名') < 1) { toast('サロンストックで書き出したExcelを選んでください'); return; }
+      const changes = [];
+      ws.eachRow((row, rn) => {
+        if (rn === 1) return;
+        let code = txt(row.getCell(col('バーコード')).value); if (/^\d+\.0+$/.test(code)) code = code.replace(/\.0+$/, '');
+        if (!code) return;
+        const m = state.master[code] || {}, ch = {};
+        const name = txt(row.getCell(col('品名')).value); if (name && name !== (m.name || '')) ch.name = name;
+        if (col('種類') > 0) { const v = txt(row.getCell(col('種類')).value); if (v && v !== (m.cat || '')) ch.cat = v; }
+        if (col('仕入先') > 0) { const v = txt(row.getCell(col('仕入先')).value); if (v && v !== (m.sup || '')) ch.sup = v; }
+        if (canMoney() && col('仕入単価') > 0) { const v = txt(row.getCell(col('仕入単価')).value); if (v !== '' && num(v) !== (m.price || 0)) ch.price = num(v); }
+        if (canMoney() && col('販売単価') > 0) { const v = txt(row.getCell(col('販売単価')).value); if (v !== '' && num(v) !== m.sell) ch.sell = num(v); }
+        if (Object.keys(ch).length) changes.push([code, ch]);
+      });
+      if (!changes.length) { toast('変わったところはありませんでした'); return; }
+      if (!confirm(`${changes.length} 品目を直します。よろしいですか？`)) return;
+      for (const [code, ch] of changes) state.master[code] = Object.assign({ price: 0, book: null }, state.master[code], ch);
+      save(); cloudHook('items', changes.map(x => x[0]));
+      for (const [code, ch] of changes) if (ch.name) shareName(code);
+      $('mxInfo').textContent = `${changes.length} 品目を直しました。`; toast(`${changes.length} 品目を直しました`); render();
+    } catch (err) { console.error(err); toast('Excelを読み込めませんでした'); }
+  });
   // ==================== お店のクラウド（Firebase：メールログイン＋Firestore） ====================
   // データの置き場所：salons/{お店}/… （ルールは firestore.rules）
   // ・各記録（数えた・入庫・出庫）は追記型の「events」。at＝サーバー時刻（同期用）、ts＝記録した時刻（期間の判定用）
@@ -2683,7 +2748,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
         for (const code of codes) {
           const m = state.master[code]; if (!m) continue;
           const it = { name: m.name || '', cat: m.cat || '', sup: m.sup || '', sell: m.sell ?? null, min: m.min ?? null, book: m.book ?? null, off: !!m.off };
-          cc.items[code] = { ...it, at: Date.now() };
+          cc.items[code] = { ...it, at: Date.now(), local: Date.now() };
           w.push({ path: `salons/${salon}/items/${code}`, data: it });
           if (money() && m.price) { cc.costs[code] = { price: m.price, at: Date.now() }; w.push({ path: `salons/${salon}/costs/${code}`, data: { price: m.price } }); }
         }
@@ -2791,6 +2856,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     async function pullOnce() {
       if (!cc || syncing || !navigator.onLine) return;
       syncing = true;
+      const pullStart = Date.now();
       try {
         await flush().catch(() => {});
         const me = await getDoc(`salons/${salon}/members/${user.uid}`).catch(e => { if (e.status === 403) return null; throw e; });
@@ -2800,7 +2866,12 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
         const cols = ['items', 'events'].concat(money() ? ['costs', 'recvPrices', 'closes'] : []);
         for (const col of cols) {
           const docs = await since(col, cc.since[col] || 0);
-          for (const d of docs) { cc[col][d.id] = d; cc.since[col] = Math.max(cc.since[col] || 0, d.at || 0); }
+          for (const d of docs) {
+            cc.since[col] = Math.max(cc.since[col] || 0, d.at || 0);
+            const loc = cc[col][d.id];
+            if (col === 'items' && loc && loc.local && loc.local >= pullStart) continue; // 同期の途中で直した商品は、直した方を残す（次の同期で送る）
+            cc[col][d.id] = d;
+          }
         }
         if (money()) {
           // 取り消された確定は一覧から消えるので、確定は全件で確かめる
