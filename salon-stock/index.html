@@ -91,6 +91,9 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   .pdf-page .p-total { text-align: right; font-weight: bold; font-size: 14px; margin: 6px 0; }
   .pdf-page .p-foot { position: absolute; bottom: 20px; left: 0; right: 0; text-align: center; color: #888; font-size: 10px; }
   .edit-btn { padding: 2px 6px; font-size: 13px; min-height: 0; vertical-align: 1px; }
+  .p-edit { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; margin-top: 2px; }
+  .p-edit .sup-in { max-width: 150px; }
+  .p-edit label { margin: 4px 0 0; white-space: nowrap; }
   .sup-in { margin-top: 4px; padding: 6px 8px; font-size: 14px; max-width: 220px; }
   .row > .narrow { flex: 0 0 96px; }
   button.btn { padding: 12px 14px; font-size: 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; }
@@ -188,7 +191,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.17</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.18</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -222,6 +225,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       <p class="muted">同じ商品を読むたびに数量が足されます。箱単位なら数量を「12」などにしてから読んでください。</p>
       <div class="nobar" data-nobar="count"></div>
       <div id="last" class="last">
+        <button id="lastClose" class="btn" style="float:right;padding:2px 10px;min-height:0" aria-label="閉じる">✕ 閉じる</button>
         <div class="name" id="lastName"></div>
         <div class="muted" id="lastCode"></div>
         <div>合計 <span class="count" id="lastCount"></span> 個
@@ -566,6 +570,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
         <button class="btn" id="hitPlus">+1</button>
       </div>
       <div class="btns">
+        <button class="btn" id="hitCancel">やめる（取り消す）</button>
         <button class="btn primary" id="hitNext">次を読む</button>
       </div>
     </div>
@@ -686,10 +691,12 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     save(); cloudHook('item', code); render(); toast('削除しました');
   });
 
+  let lastAdd = {}; // 最後に足した商品と数
   function addCount(code, qty) {
     code = String(code).trim();
     if (!code) return;
     revive(code);
+    if (Number(qty) > 0) lastAdd = { code, qty: Number(qty) };
     qty = Number(qty);
     if (!Number.isFinite(qty)) qty = 1;
     const place = state.place.trim() || '（場所なし）';
@@ -1209,7 +1216,9 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   const hitQty = (code) => scanMode === 'recv' ? ((state.draft.lines.find(l => l.code === code) || {}).qty || 0)
     : scanMode === 'out' ? ((state.oDraft.lines.find(l => l.code === code) || {}).qty || 0)
     : (state.counts[code] ? state.counts[code].qty : 0);
+  let hitBase = 0; // この画面を開く前の数（「やめる」で戻す）
   function showHit(code) {
+    if (code !== hitCode) hitBase = hitQty(code) - (lastAdd.code === code ? lastAdd.qty : 0);
     hitCode = code;
     $('hitCount').textContent = hitQty(code);
     document.querySelector('.hit-ok').textContent = scanMode === 'recv' ? '✓ 入庫に追加しました' : scanMode === 'out' ? (state.oDraft.type === 'use' ? '✓ 材料の使用に追加しました' : '✓ 店販の販売に追加しました') : '✓ 読み取りました';
@@ -1234,6 +1243,12 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     if (scanner) { try { scanner.resume(); } catch (e) {} }
   }
   $('hitNext').addEventListener('click', closeHit);
+  $('hitCancel').addEventListener('click', () => {
+    const d = hitBase - hitQty(hitCode);
+    if (d) { if (scanMode === 'recv') addRecv(hitCode, d); else if (scanMode === 'out') addOut(hitCode, d); else { addCount(hitCode, d); } }
+    if (scanMode === 'count' && !(state.counts[hitCode] || {}).qty) $('last').style.display = 'none';
+    closeHit(); toast('取り消しました');
+  });
   const bump = (d) => { clearTimeout(autoTimer); if (scanMode === 'recv') addRecv(hitCode, d); else if (scanMode === 'out') addOut(hitCode, d); else addCount(hitCode, d); $('hitCount').textContent = hitQty(hitCode); };
   $('hitPlus').addEventListener('click', () => bump(1));
   $('hitMinus').addEventListener('click', () => bump(-1));
@@ -1249,6 +1264,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   $('addBtn').addEventListener('click', addFromInput);
   $('code').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addFromInput(); } });
 
+  $('lastClose').addEventListener('click', () => { $('last').style.display = 'none'; $('lastInfo').innerHTML = ''; $('code').value = ''; window.scrollTo({ top: 0, behavior: 'smooth' }); });
   $('undoBtn').addEventListener('click', () => {
     const h = state.history.pop();
     if (!h) return;
@@ -1372,7 +1388,9 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       : !rows.length ? `<tr><td class="muted">${f === 'none' && !noPrice ? '単価がまだの商品はありません 🎉' : '当てはまる商品がありません。'}</td></tr>`
       : '<tr><th></th><th>商品</th><th class="num">仕入単価</th><th class="num">販売単価</th></tr>' + rows.map(t => `<tr>
         <td><input type="checkbox" class="pchk" data-psel="${esc(t.code)}" ${selPrice.has(t.code) ? 'checked' : ''} aria-label="選ぶ"></td>
-        <td>${t.cat ? `<span class="cat-tag">${esc(t.cat)}</span>` : ''}${esc(t.name)} <button class="btn edit-btn" data-editname="${esc(t.code)}" aria-label="名前を直す">✏️</button> <button class="btn edit-btn" data-delitem="${esc(t.code)}" aria-label="商品を削除">🗑</button><br><span class="muted">${esc(t.code)}　${esc(sup[t.code] || '仕入先なし')}　在庫 ${t.counted ? t.qty : Math.max(0, t.book ?? 0)}</span></td>
+        <td>${t.cat ? `<span class="cat-tag">${esc(t.cat)}</span>` : ''}${esc(t.name)} <button class="btn edit-btn" data-editname="${esc(t.code)}" aria-label="名前を直す">✏️</button> <button class="btn edit-btn" data-delitem="${esc(t.code)}" aria-label="商品を削除">🗑</button><br><span class="muted">${esc(t.code)}</span>
+          <div class="p-edit"><input class="sup-in" list="supList2" placeholder="仕入先" value="${esc(supOfItem(t.code))}" data-psup="${esc(t.code)}" aria-label="仕入先">
+          <label class="muted">在庫 <input class="qty-input" style="width:64px" type="number" inputmode="numeric" min="0" value="${t.counted ? t.qty : Math.max(0, t.book ?? 0)}" data-pqty="${esc(t.code)}" aria-label="在庫の数"> 個</label></div></td>
         <td class="num"><input class="qty-input" style="width:90px" type="number" inputmode="numeric" min="0" placeholder="円" value="${t.price || ''}" data-pprice="${esc(t.code)}" aria-label="仕入単価"></td>
         <td class="num">${t.cat === RETAIL || t.sell != null ? `<input class="qty-input" style="width:90px" type="number" inputmode="numeric" min="0" placeholder="円" value="${t.sell ?? ''}" data-psell="${esc(t.code)}" aria-label="販売単価">` : '<span class="muted">-</span>'}</td></tr>`).join('');
   }
@@ -1396,7 +1414,10 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   ['priceFilter', 'priceCat', 'priceSup'].forEach(id => $(id).addEventListener('change', () => { keepPrice.clear(); selPrice.clear(); renderPrices(); }));
   $('priceQ').addEventListener('input', () => { keepPrice.clear(); renderPrices(); });
   $('priceTable').addEventListener('change', e => {
-    const d = e.target.dataset, code = d.pprice ?? d.psell; if (code === undefined) return;
+    const d = e.target.dataset;
+    if (d.psup !== undefined) { setSup(d.psup, e.target.value); keepPrice.add(d.psup); toast(supOfItem(d.psup) ? `仕入先：${supOfItem(d.psup)}` : '仕入先を外しました'); setTimeout(() => { const y = window.scrollY; render(); window.scrollTo(0, y); }, 0); return; }
+    if (d.pqty !== undefined) { const v = Number(e.target.value); if (e.target.value === '' || !Number.isFinite(v) || v < 0) return; setCountQty(d.pqty, v); keepPrice.add(d.pqty); toast(`在庫を ${v} 個にしました`); setTimeout(() => { const y = window.scrollY; render(); window.scrollTo(0, y); }, 0); return; }
+    const code = d.pprice ?? d.psell; if (code === undefined) return;
     const m = state.master[code] || (state.master[code] = { name: '', price: 0, book: null });
     const v = e.target.value === '' ? null : Math.max(0, Number(e.target.value) || 0);
     if (d.pprice !== undefined) m.price = v || 0; else m.sell = v;
@@ -1415,15 +1436,20 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       save(); cloudHook('item', mc); toast(m.min === null ? '発注点を外しました' : `発注点を ${m.min} にしました`); return;
     }
     const code = e.target.dataset.code; if (code === undefined) return;
-    const c = state.counts[code]; const v = Number(e.target.value);
-    if (!c || !Number.isFinite(v)) return;
-    // 手で直した分は「手修正」として場所ごとの内訳を調整
+    const v = Number(e.target.value);
+    if (!state.counts[code] || !Number.isFinite(v)) return;
+    setCountQty(code, v); setTimeout(renderList, 0);
+  });
+  // 数を直接直す（手で直した分は「手修正」として場所ごとの内訳を調整）。まだ数えていない商品は、この数で数えたことにする
+  function setCountQty(code, v) {
+    revive(code);
+    const c = state.counts[code] || (state.counts[code] = { qty: 0, places: {} });
     const diff = v - c.qty;
     c.qty = v; c.places['手修正'] = (c.places['手修正'] || 0) + diff;
-    if (diff) cloudHook('count', code, diff, '手修正');
+    if (diff || !c.updated) cloudHook('count', code, diff, '手修正');
     if (!c.places['手修正']) delete c.places['手修正'];
-    c.updated = Date.now(); save(); renderList();
-  });
+    c.updated = Date.now(); save();
+  }
   $('countTable').addEventListener('click', e => {
     const code = e.target.dataset.del; if (code === undefined) return;
     if (confirm(`「${nameOf(code)}」を消しますか？`)) {
@@ -1648,6 +1674,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
 
   function addRecv(code, qty) {
     code = String(code).trim(); if (!code) return; revive(code);
+    if (Number(qty) > 0) lastAdd = { code, qty: Number(qty) };
     qty = Number(qty); if (!Number.isFinite(qty)) qty = 1;
     let line = state.draft.lines.find(l => l.code === code);
     if (!line) {
@@ -2064,6 +2091,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   }
   function addOut(code, qty) {
     code = String(code).trim(); if (!code) return; revive(code);
+    if (Number(qty) > 0) lastAdd = { code, qty: Number(qty) };
     qty = Number(qty); if (!Number.isFinite(qty)) qty = 1;
     let line = state.oDraft.lines.find(l => l.code === code);
     if (!line) {
