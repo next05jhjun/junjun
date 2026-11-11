@@ -192,7 +192,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.22</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.23</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -471,6 +471,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
         <div id="cStartMsg" class="start-msg" style="display:none">
           <b>はじめに、どちらかを選んでください</b>
           <div class="muted">お店のオーナーは「お店を作る」、スタッフは招待コードで「参加」します。</div>
+          <div class="muted" style="margin-top:6px">📱 <b>スマホで使っているお店が、パソコンで出ないとき</b>：スマホの「設定」→「お店のクラウド」の「ログイン中：」のメールアドレスと、ログインの方法（Google／メール）を、ここと同じにしてください。違うアカウントだと、別の人として扱われます。<br>または、スマホで「スタッフを招待する」から権限「全部」の招待コードを作り、ここで「参加」しても、同じお店のデータを見られます。</div>
         </div>
         <div class="btns" id="cSyncBtns">
           <button id="cSyncNow" class="btn">🔄 今すぐ同期</button>
@@ -2916,7 +2917,8 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     window.addEventListener('online', () => { if (Cloud.on) pull(); });
 
     // ---------- お店の選択・作成・参加 ----------
-    async function mySalons() { const u = await getDoc(`users/${user.uid}`).catch(() => null); return (u && u.salons) || {}; }
+    // strict：読めなかったときに空として扱わない（書き戻しで、入っているお店の一覧を消さないため）
+    async function mySalons(strict) { const u = strict ? await getDoc(`users/${user.uid}`) : await getDoc(`users/${user.uid}`).catch(() => null); return (u && u.salons) || {}; }
     async function chooseSalon(id, name) {
       if (cc && salon) { try { await flush(); } catch (e) {} }
       salon = id || '';
@@ -2950,7 +2952,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     const genId = () => 's' + Array.from(crypto.getRandomValues(new Uint8Array(12)), b => 'abcdefghijkmnpqrstuvwxyz23456789'[b % 32]).join('');
     const genCode = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), b => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 32]).join('');
     async function createSalon(name) {
-      const id = genId(), list = await mySalons();
+      const id = genId(), list = await mySalons(true);
       await commit([
         { path: `salons/${id}`, data: { name, owner: user.uid } },
         { path: `salons/${id}/members/${user.uid}`, data: { role: 'owner', email: user.email } },
@@ -2963,7 +2965,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       if (!inv) throw new Error('招待コードが見つかりません');
       if (inv.expires < Date.now()) throw new Error('招待コードの期限が切れています');
       if (!confirm(`「${inv.salonName}」に「${ROLE_LABEL[inv.role]}」の権限で参加しますか？`)) return '';
-      const list = await mySalons();
+      const list = await mySalons(true);
       await commit([
         { path: `salons/${inv.salon}/members/${user.uid}`, data: { role: inv.role, email: user.email, invite: code } },
         { path: `users/${user.uid}`, data: { salons: { ...list, [inv.salon]: inv.salonName } }, merge: true, serverAt: false },
@@ -3165,7 +3167,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       if (!confirm(`「${cc.salon.name}」から抜けますか？`)) return;
       try {
         await commit([{ path: `salons/${salon}/members/${user.uid}`, del: true }]);
-        const list = await mySalons(); delete list[salon];
+        const list = await mySalons(true); delete list[salon];
         await commit([{ path: `users/${user.uid}`, data: { salons: list }, serverAt: false }]);
         await chooseSalon('');
       } catch (x) { toast('抜けられませんでした'); }
