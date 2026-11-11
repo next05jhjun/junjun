@@ -191,7 +191,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.19</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.20</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -350,7 +350,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       <div id="nameFind"></div>
       <div id="tidyBox"></div>
       <details class="rename"><summary>📗 品名・種類・仕入先をExcelでまとめて直す</summary>
-        <p class="muted">① 書き出したExcelで、品名・種類・仕入先・単価を直して保存 → ② そのファイルを読み込むと、まとめて直ります。空欄のところは今のままです。バーコードの列は変えないでください。</p>
+        <p class="muted">① 書き出したExcelで、品名・種類・仕入先・単価を直して保存 → ② そのファイルを読み込むと、まとめて直ります。空欄のところは今のままです。<b>要らない商品は、その行ごと消して</b>保存すると削除されます。バーコードの列は変えないでください。</p>
         <div class="btns"><button id="mxOut" class="btn">① 商品の一覧をExcelで書き出す</button>
           <label class="btn" style="margin:0">② 直したExcelを読み込む<input type="file" id="mxIn" accept=".xlsx" style="display:none"></label></div>
         <p class="muted" id="mxInfo"></p>
@@ -691,11 +691,14 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     const t = buildTotal().find(x => x.code === code) || {}, c = state.counts[code];
     const stock = c ? c.qty : Math.max(0, t.book || 0);
     if (!confirm(`「${nameOf(code)}」を削除しますか？` + (stock ? `\n在庫が ${stock} 個あります。在庫金額からも外れます。` : '') + (c ? '\n数えた数も消します。' : '') + '\n（入庫・出庫の記録は残ります。もう一度バーコードを読むと元に戻ります）')) return;
+    deleteItem(code); save(); cloudHook('item', code); render(); toast('削除しました');
+  });
+  function deleteItem(code) { // 保存・送信・描き直しは呼んだ側で
+    const c = state.counts[code];
     if (c) { for (const [pl, q] of Object.entries(c.places)) if (q) cloudHook('count', code, -q, pl); delete state.counts[code]; }
     state.master[code] = Object.assign({ name: (state.lookup[code] || {}).name || '', price: 0, book: null }, state.master[code], { off: true });
     selPrice.delete(code); keepPrice.delete(code);
-    save(); cloudHook('item', code); render(); toast('削除しました');
-  });
+  }
 
   let lastAdd = {}; // 最後に足した商品と数
   function addCount(code, qty) {
@@ -2520,11 +2523,12 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       const head = []; ws.getRow(1).eachCell({ includeEmpty: true }, (c, n) => { head[n] = txt(c.value); });
       const col = (name) => head.indexOf(name);
       if (col('バーコード') < 1 || col('品名') < 1) { toast('サロンストックで書き出したExcelを選んでください'); return; }
-      const changes = [];
+      const changes = [], seen = new Set();
       ws.eachRow((row, rn) => {
         if (rn === 1) return;
         let code = txt(row.getCell(col('バーコード')).value); if (/^\d+\.0+$/.test(code)) code = code.replace(/\.0+$/, '');
         if (!code) return;
+        seen.add(code);
         const m = state.master[code] || {}, ch = {};
         const name = txt(row.getCell(col('品名')).value); if (name && name !== (m.name || '')) ch.name = name;
         if (col('種類') > 0) { const v = txt(row.getCell(col('種類')).value); if (v && v !== (m.cat || '')) ch.cat = v; }
@@ -2533,12 +2537,16 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
         if (canMoney() && col('販売単価') > 0) { const v = txt(row.getCell(col('販売単価')).value); if (v !== '' && num(v) !== m.sell) ch.sell = num(v); }
         if (Object.keys(ch).length) changes.push([code, ch]);
       });
-      if (!changes.length) { toast('変わったところはありませんでした'); return; }
-      if (!confirm(`${changes.length} 品目を直します。よろしいですか？`)) return;
+      // Excelから消した行（書き出したときにあった商品）は、削除する
+      const gone = seen.size ? priceItems().map(t => t.code).filter(c => !seen.has(c)) : [];
+      if (!changes.length && !gone.length) { toast('変わったところはありませんでした'); return; }
+      if (!confirm([changes.length ? `${changes.length} 品目を直します。` : '', gone.length ? `Excelに無い ${gone.length} 品目を削除します（${gone.slice(0, 3).map(nameOf).join('、')}${gone.length > 3 ? ' など' : ''}）。` : '', 'よろしいですか？'].filter(Boolean).join('\n'))) return;
       for (const [code, ch] of changes) state.master[code] = Object.assign({ price: 0, book: null }, state.master[code], ch);
-      save(); cloudHook('items', changes.map(x => x[0]));
+      for (const code of gone) deleteItem(code);
+      save(); cloudHook('items', [...changes.map(x => x[0]), ...gone]);
       for (const [code, ch] of changes) if (ch.name) shareName(code);
-      $('mxInfo').textContent = `${changes.length} 品目を直しました。`; toast(`${changes.length} 品目を直しました`); render();
+      const msg = [changes.length ? `${changes.length} 品目を直しました` : '', gone.length ? `${gone.length} 品目を削除しました` : ''].filter(Boolean).join('・');
+      $('mxInfo').textContent = msg + '。'; toast(msg); render();
     } catch (err) { console.error(err); toast('Excelを読み込めませんでした'); }
   });
   // ==================== お店のクラウド（Firebase：メールログイン＋Firestore） ====================
