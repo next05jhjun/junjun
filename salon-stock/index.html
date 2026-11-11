@@ -181,6 +181,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   .crop button:disabled { opacity: .45; }
   body.record-only .money, body.record-only nav button[data-tab="total"] { display: none !important; }
   .sync-warn { margin: 8px 12px 0; padding: 8px 10px; border-radius: 8px; background: #fff4d6; color: #5a4300; font-size: 13px; }
+  #cloudIn.listerr details.start { display: none; }
   .salon-chip::after { content: ' ▾'; }
   .salon-menu { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; padding: 70px 16px 16px; }
   .salon-menu > div { background: var(--card); color: var(--text); border-radius: 12px; padding: 12px; width: 100%; max-width: 420px; box-shadow: 0 8px 30px rgba(0,0,0,.25); }
@@ -192,7 +193,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.23</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.24</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -2677,6 +2678,8 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       if (!r.ok) { const e = new Error((j.error && j.error.message) || ('HTTP ' + r.status)); e.status = r.status; throw e; }
       return j;
     }
+    // 通信エラーをわかりやすい言葉に
+    const errText = (e) => { const m = String((e && e.message) || e || ''); return /quota|RESOURCE_EXHAUSTED|429/i.test(m + ' ' + (e && e.status)) ? 'クラウドの1日に使える量の上限に達しました（日本時間の夕方5時ごろに元に戻ります）' : /Failed to fetch|NetworkError|Load failed/i.test(m) ? '通信できませんでした（電波を確かめてください）' : m; };
     const getDoc = async (path) => { const j = await req('GET', `${BASE}/${path}`); return j ? { id: docId(j.name), ...fromF(j.fields) } : null; };
     async function listDocs(path) {
       const out = []; let page = '';
@@ -2884,11 +2887,17 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       const pullStart = Date.now();
       try {
         await flush().catch(() => {});
-        const me = await getDoc(`salons/${salon}/members/${user.uid}`).catch(e => { if (e.status === 403) return null; throw e; });
-        if (!me) { lastErr = 'このお店のメンバーではなくなりました'; cc.role = ''; status(); syncing = false; pullP = null; await chooseSalon(''); return; }
-        cc.role = me.role;
+        // クラウドの読み取り回数を減らす：権限・設定は5分に1回、確定の一覧は確定が変わったときだけ
+        const slow = !cc.role || !cc.slowAt || Date.now() - cc.slowAt > 5 * 60000;
+        if (slow) {
+          const me = await getDoc(`salons/${salon}/members/${user.uid}`).catch(e => { if (e.status === 403) return null; throw e; });
+          if (!me) { lastErr = 'このお店のメンバーではなくなりました'; cc.role = ''; status(); syncing = false; pullP = null; await chooseSalon(''); return; }
+          cc.role = me.role; cc.slowAt = Date.now();
+        }
+        const prevClose = Number(cc.salon.lastCloseAt) || 0;
         const sdoc = await getDoc(`salons/${salon}`); if (sdoc) cc.salon = sdoc;
-        const cols = ['items', 'events'].concat(money() ? ['costs', 'recvPrices', 'closes'] : []);
+        const closeChanged = slow || (Number(cc.salon.lastCloseAt) || 0) !== prevClose;
+        const cols = ['items', 'events'].concat(money() ? ['costs', 'recvPrices'] : []);
         for (const col of cols) {
           const docs = await since(col, cc.since[col] || 0);
           for (const d of docs) {
@@ -2898,20 +2907,20 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
             cc[col][d.id] = d;
           }
         }
-        if (money()) {
+        if (money() && closeChanged) {
           // 取り消された確定は一覧から消えるので、確定は全件で確かめる
           const all = await listDocs(`salons/${salon}/closes`);
           cc.closes = Object.fromEntries(all.map(d => [d.id, d]));
-          const st = await getDoc(`salons/${salon}/settings/main`); if (st) cc.settings.main = st;
         }
+        if (money() && slow) { const st = await getDoc(`salons/${salon}/settings/main`); if (st) cc.settings.main = st; }
         cc.lastPull = Date.now(); lastErr = '';
         store(); derive();
-      } catch (e) { lastErr = '同期できませんでした（' + e.message + '）'; }
+      } catch (e) { lastErr = '同期できませんでした（' + errText(e) + '）'; }
       finally { syncing = false; status(); }
     }
     function startLoop() {
       clearInterval(timer);
-      timer = setInterval(() => { if (document.visibilityState === 'visible') pull(); }, 30000);
+      timer = setInterval(() => { if (document.visibilityState === 'visible') pull(); }, 60000); // 1分に1回
     }
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && Cloud.on) pull(); });
     window.addEventListener('online', () => { if (Cloud.on) pull(); });
@@ -3024,11 +3033,14 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       $('cloudIn').style.display = user ? '' : 'none';
       if (!user) { gate(); return; }
       $('cWho').textContent = user.email;
-      const list = await mySalons().catch(() => ({}));
+      let listErr = null; const list = await mySalons(true).catch(e => { listErr = e; return {}; });
       $('cSalon').innerHTML = (salon ? '' : '<option value="">（お店を選んでください）</option>') + Object.entries(list).map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join('');
       $('cSalon').value = salon in list || !salon ? salon : '';
       const none = !Object.keys(list).length && !salon; // まだお店が無い：作る／参加するを大きく出す
       $('cloudIn').classList.toggle('nosalon', none);
+      // 一覧が読めなかったときは「お店を作る」を出さない（お店が無いのではなく、読めなかっただけ）
+      $('cloudIn').classList.toggle('listerr', !!listErr && none);
+      if (listErr && none) { lastErr = 'お店の一覧を読み込めませんでした：' + errText(listErr) + '。新しくお店を作らずに、少し待ってから開き直してください。'; $('cMsg').textContent = lastErr; }
       $('cHasSalon').style.display = $('cSyncBtns').style.display = none ? 'none' : '';
       $('cStartMsg').style.display = none ? '' : 'none';
       const role = cc ? cc.role : '';
@@ -3180,7 +3192,8 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       toast(`クラウドに移しました（${n} 件）`); cc.since = {}; await pull(); fillUI();
     }));
     async function afterLogin() {
-      const list = await mySalons().catch(() => ({}));
+      let failed = false; const list = await mySalons(true).catch(() => { failed = true; return {}; });
+      if (failed) { if (salon) await chooseSalon(salon); fillUI(); return; } // 読めなかったときは、今のお店のまま
       const join = new URLSearchParams(location.search).get('join');
       if (join) { $('cJoinCode').value = join; $('cJoinBox').open = true; }
       const ids = Object.keys(list);
