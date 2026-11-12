@@ -193,7 +193,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.25</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.26</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -2703,19 +2703,22 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       return out;
     }
     // at（サーバー時刻）が since より新しいものだけ取る（差分の同期）
-    async function since(col, ms) {
-      const out = []; let from = Math.max(0, ms - 60000); // 時刻の前後のずれに備えて1分重ねる
+    // from：前回いちばん新しかった at（サーバー時刻の文字列のまま。マイクロ秒まであるので、同じものを読み直さない）
+    // ※前は「1分重ねて」読んでいたため、まとめて保存した商品（Excelの読み込みなど）を1分ごとに全部読み直し、読み取り回数を使い切っていた
+    const tsKey = (t) => String(t).replace(/(\.\d+)?Z$/, m => '.' + (m.length > 1 ? m.slice(1, -1) : '').padEnd(9, '0') + 'Z'); // 小数点以下の桁をそろえて比べる
+    async function since(col, from) {
+      const out = []; let last = from;
       for (let i = 0; i < 40; i++) {
         const j = await req('POST', `${BASE}/salons/${salon}:runQuery`, { structuredQuery: {
           from: [{ collectionId: col }],
-          where: { fieldFilter: { field: { fieldPath: 'at' }, op: 'GREATER_THAN', value: { timestampValue: new Date(from).toISOString() } } },
+          where: { fieldFilter: { field: { fieldPath: 'at' }, op: 'GREATER_THAN', value: { timestampValue: last || new Date(0).toISOString() } } },
           orderBy: [{ field: { fieldPath: 'at' }, direction: 'ASCENDING' }], limit: 300 } });
-        const docs = (j || []).filter(x => x.document).map(x => ({ id: docId(x.document.name), ...fromF(x.document.fields) }));
-        out.push(...docs);
-        if (docs.length < 300) break;
-        from = docs[docs.length - 1].at;
+        const rows = (j || []).filter(x => x.document);
+        out.push(...rows.map(x => ({ id: docId(x.document.name), ...fromF(x.document.fields) })));
+        if (rows.length) { const f = rows[rows.length - 1].document.fields.at; if (f && f.timestampValue) last = f.timestampValue; }
+        if (rows.length < 300) break;
       }
-      return out;
+      return { docs: out, last };
     }
     // 書き込み：{ path, data, merge: true, serverAt: true } / { path, del: true }
     async function commit(writes) {
@@ -2733,7 +2736,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     // オフラインでも記録できるよう、書き込みは順番待ちの列に入れてから送る
     function enqueue(writes) { cc.queue.push(...writes); store(); flushSoon(); }
     let flushT = null;
-    function flushSoon(ms = 1500) { clearTimeout(flushT); flushT = setTimeout(() => flush().then(() => pull()).catch(() => {}), ms); }
+    function flushSoon(ms = 1500) { clearTimeout(flushT); flushT = setTimeout(() => flush().catch(() => {}), ms); } // 送るだけ（読みに行くのは1分ごとの同期で）
     async function flush() {
       if (!cc || !cc.queue.length || !navigator.onLine) return;
       sealCount();
@@ -2910,8 +2913,14 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
         const sdoc = await getDoc(`salons/${salon}`); if (sdoc) cc.salon = sdoc;
         const closeChanged = slow || (Number(cc.salon.lastCloseAt) || 0) !== prevClose;
         const cols = ['items', 'events'].concat(money() ? ['costs', 'recvPrices'] : []);
+        cc.sinceTs = cc.sinceTs || {};
+        // 念のため30分に1回だけ、1分さかのぼって読み直す（ほぼ同時に保存された記録の取りこぼし対策）
+        const back = !cc.backAt || Date.now() - cc.backAt > 30 * 60000; if (back) cc.backAt = Date.now();
         for (const col of cols) {
-          const docs = await since(col, cc.since[col] || 0);
+          let from = cc.sinceTs[col] || (cc.since[col] ? new Date(cc.since[col]).toISOString() : '');
+          if (back && from) from = new Date(Date.parse(from) - 60000).toISOString();
+          const { docs, last } = await since(col, from);
+          if (last && (!cc.sinceTs[col] || tsKey(last) > tsKey(cc.sinceTs[col]))) cc.sinceTs[col] = last;
           for (const d of docs) {
             cc.since[col] = Math.max(cc.since[col] || 0, d.at || 0);
             const loc = cc[col][d.id];
@@ -2930,9 +2939,17 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       } catch (e) { lastErr = '同期できませんでした（' + errText(e) + '）'; }
       finally { syncing = false; status(); }
     }
+    let lastTouch = Date.now();
+    ['pointerdown', 'keydown', 'scroll'].forEach(ev => window.addEventListener(ev, () => { lastTouch = Date.now(); }, { passive: true, capture: true }));
     function startLoop() {
       clearInterval(timer);
-      timer = setInterval(() => { if (document.visibilityState === 'visible') pull(); }, 60000); // 1分に1回
+      // 使っている間は1分に1回。3分さわっていなければ5分に1回（パソコンで開きっぱなしのとき）
+      timer = setInterval(() => {
+        if (document.visibilityState !== 'visible') return;
+        const idle = Date.now() - lastTouch > 3 * 60000;
+        if (idle && cc && cc.lastPull && Date.now() - cc.lastPull < 5 * 60000) return;
+        pull();
+      }, 60000);
     }
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && Cloud.on) pull(); });
     window.addEventListener('online', () => { if (Cloud.on) pull(); });
@@ -3201,7 +3218,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       if (!asked && !confirm('このスマホに入っている商品・入庫・出庫・確定・数えた結果を、今のお店のクラウドに移します。よろしいですか？（1回だけ行ってください）')) return;
       const n = await migrate();
       try { localStorage.setItem(LOCAL_BACKUP + ':migrated:' + salon, '1'); } catch (x) {}
-      toast(`クラウドに移しました（${n} 件）`); cc.since = {}; await pull(); fillUI();
+      toast(`クラウドに移しました（${n} 件）`); cc.since = {}; cc.sinceTs = {}; await pull(); fillUI();
     }));
     async function afterLogin() {
       let failed = false; const list = await mySalons(true).catch(() => { failed = true; return {}; });
