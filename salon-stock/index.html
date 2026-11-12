@@ -193,7 +193,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
 </head>
 <body>
 <header>
-  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.24</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>サロンストック <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 4.25</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -226,6 +226,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       </div>
       <button id="addBtn" class="btn primary full" style="margin-top:8px">追加（Enterでも可）</button>
       <p class="muted">同じ商品を読むたびに数量が足されます。箱単位なら数量を「12」などにしてから読んでください。</p>
+      <p class="muted">📷 読みにくいときは：明るい所で、バーコードを枠の横いっぱいに入れて、<b>15〜20cmほど離して</b>ください（近すぎるとピントが合いません）。光の反射が入らないよう、少し斜めにすると読みやすくなります。</p>
       <div class="nobar" data-nobar="count"></div>
       <div id="last" class="last">
         <button id="lastClose" class="btn" style="float:right;padding:2px 10px;min-height:0" aria-label="閉じる">✕ 閉じる</button>
@@ -606,9 +607,9 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { toast('保存できませんでした（容量不足など）'); }
   }
 
-  function toast(msg) {
+  function toast(msg, ms = 1800) {
     const t = $('toast'); t.textContent = msg; t.classList.add('show');
-    clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove('show'), 1800);
+    clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove('show'), ms);
   }
   function beep() {
     try {
@@ -1315,9 +1316,12 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     if (!window.Html5Qrcode) { toast('読み取り機能を読み込めませんでした。通信を確認してください'); return; }
     scanMode = mode; lastScan = { code: '', at: 0 };
     const F = Html5QrcodeSupportedFormats;
-    scanner = new Html5Qrcode({ recv: 'reader2', out: 'reader3' }[mode] || 'reader', { formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.ITF, F.QR_CODE], verbose: false });
-    try {
-      await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 260, height: 140 } }, (text) => {
+    // 商品のバーコード（JAN）に絞ると、速く・間違えにくくなる
+    scanner = new Html5Qrcode({ recv: 'reader2', out: 'reader3' }[mode] || 'reader', { formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.ITF], verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+    // 読み取る枠は横長で大きめ。カメラは高い解像度・ピント合わせ続け（細いバーコードを読みやすく）
+    const box = (w, h) => ({ width: Math.max(200, Math.floor(w * 0.9)), height: Math.max(100, Math.floor(Math.min(h * 0.6, w * 0.5))) });
+    const hi = { fps: 15, qrbox: box, videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: 'continuous' }] } };
+    const onScan = (text) => {
         if (hitCode !== null) return;
         const now = Date.now();
         // 同じバーコードを連続で拾わないよう2秒あける
@@ -1327,11 +1331,19 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
         if (scanMode === 'recv') addRecv(text, $('rQty').value); else if (scanMode === 'out') addOut(text, $('oQty').value); else addCount(text, $('qty').value);
         showHit(text);
         if (state.opt.auto) autoTimer = setTimeout(() => { lastScan.at = Date.now(); closeHit(); }, 1500);
-      });
+    };
+    try {
+      try { await scanner.start({ facingMode: 'environment' }, hi, onScan); }
+      catch (e) { if (/NotAllowed|Permission/i.test(String(e && (e.name || e)))) throw e; await scanner.start({ facingMode: 'environment' }, { fps: 15, qrbox: box }, onScan); } // 高い解像度が使えない機種は、ふつうの設定で
+      try { // 少しズームすると、近づけすぎてピントが合わない問題が減る（できる機種だけ）
+        const cap = scanner.getRunningTrackCapabilities && scanner.getRunningTrackCapabilities();
+        if (cap && cap.zoom && cap.zoom.max >= 1.5) await scanner.applyVideoConstraints({ advanced: [{ zoom: Math.min(2, cap.zoom.max) }] });
+      } catch (e) {}
       $({ recv: 'camBtn2', out: 'camBtn3' }[mode] || 'camBtn').textContent = '■ カメラを止める';
     } catch (e) {
       scanner = null;
-      toast('カメラを使えませんでした。ブラウザでカメラを許可してください');
+      const denied = /NotAllowed|Permission/i.test(String(e && (e.name || e)));
+      toast(denied ? 'カメラが許可されていません。iPhoneは「設定」→「Safari」→「カメラ」を「許可」にしてください' : 'カメラを起動できませんでした。ほかのアプリでカメラを使っていたら閉じてから、もう一度押してください', 6000);
     }
   }
   async function stopCamera() {
