@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<script>/* LINEの中で開いたときは、Safari・Chromeで開き直す（LINEの中ではGoogleログインができないため） */
+if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(location.search)) location.replace(location.pathname + (location.search ? location.search + '&' : '?') + 'openExternalBrowser=1' + location.hash);</script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>カラーレシピ（試作）</title>
+<meta name="theme-color" content="#b0457a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="カラーレシピ">
+<style>
+  :root {
+    --bg: #f7f6f8; --card: #ffffff; --text: #1f1d24; --muted: #6c6676;
+    --line: #e2dee6; --accent: #b0457a; --accent-text: #ffffff;
+    --ok: #1a7f37; --warn: #a35400; --bad: #c62828; --hl: #fff4e0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141218; --card: #1e1b23; --text: #ece8f0; --muted: #a39cad;
+      --line: #322d39; --accent: #f08cbc; --accent-text: #1a0d14;
+      --ok: #4ac26b; --warn: #f0a050; --bad: #ff6b6b; --hl: #3a2f1e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 16px; line-height: 1.55; }
+  header { background: var(--card); border-bottom: 1px solid var(--line); padding: 10px 16px; position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; }
+  header h1 { margin: 0; font-size: 18px; white-space: nowrap; }
+  header h1 small { font-size: 12px; color: var(--muted); font-weight: normal; }
+  #salonChip { margin-left: auto; font-size: 13px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; background: var(--bg); color: var(--text); max-width: 45vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  main { max-width: 680px; margin: 0 auto; padding: 12px 16px 80px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  .card h2 { font-size: 17px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+  .card h2 .num { background: var(--accent); color: var(--accent-text); border-radius: 999px; width: 24px; height: 24px; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .small { font-size: 13px; }
+  .btn { display: inline-block; font-size: 15px; padding: 9px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; }
+  .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: bold; }
+  .btn.big { width: 100%; padding: 14px; font-size: 17px; }
+  .btn:disabled { opacity: .5; }
+  .btn.on { outline: 3px solid var(--accent); }
+  input[type=text], input[type=email], input[type=password], select, textarea { width: 100%; font-size: 16px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); font-family: inherit; }
+  textarea { min-height: 60px; }
+  label.f { display: block; margin: 10px 0 4px; font-size: 14px; font-weight: bold; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row > * { flex: 1 1 auto; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .chips button { font-size: 13px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  .seg button { flex: 1 1 auto; font-size: 14px; padding: 8px 6px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  .seg button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .photos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .ph { border: 2px dashed var(--line); border-radius: 12px; padding: 8px; text-align: center; min-height: 150px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 6px; cursor: pointer; position: relative; }
+  .ph img { width: 100%; max-height: 180px; object-fit: cover; border-radius: 8px; }
+  .ph b { font-size: 15px; }
+  .ph input { display: none; }
+  .tip { background: var(--hl); border-radius: 10px; padding: 8px 10px; font-size: 13px; margin-top: 8px; }
+  .tip ul { margin: 4px 0 0; padding-left: 18px; }
+  .dye { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .dye:last-child { border-bottom: 0; }
+  .dye .nm { flex: 1 1 auto; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+  .dye select { width: auto; font-size: 13px; padding: 4px 6px; flex: none; }
+  .dye input[type=checkbox] { width: 20px; height: 20px; flex: none; }
+  .tag { font-size: 11px; border-radius: 6px; padding: 1px 6px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .res h3 { font-size: 16px; margin: 14px 0 6px; padding-left: 8px; border-left: 4px solid var(--accent); }
+  .res table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  .res td { padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .res td.g { text-align: right; white-space: nowrap; font-weight: bold; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 15px; margin-top: 6px; }
+  .kv b { white-space: nowrap; }
+  .warn { color: var(--warn); }
+  .bad { color: var(--bad); }
+  .safety { border: 2px solid var(--warn); border-radius: 10px; padding: 8px 10px; font-size: 14px; margin-top: 12px; }
+  .fb { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .fb button { padding: 12px 4px; font-size: 15px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  .fb button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: bold; }
+  .log { border-bottom: 1px solid var(--line); padding: 8px 0; font-size: 14px; }
+  .log:last-child { border-bottom: 0; }
+  .banner { background: var(--hl); border-radius: 10px; padding: 8px 12px; font-size: 14px; margin-bottom: 12px; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; z-index: 20; }
+  #toast.show { opacity: .95; }
+  .spinner { display: inline-block; width: 18px; height: 18px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: sp 0.8s linear infinite; vertical-align: middle; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  details summary { cursor: pointer; font-weight: bold; font-size: 14px; padding: 4px 0; }
+  .hide { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>カラーレシピ <small>試作</small></h1>
+  <button id="salonChip" class="hide" type="button"></button>
+</header>
+<main>
+  <div id="demoBanner" class="banner hide">🧪 練習モード：本物のクラウドには書き込みません（データはこのブラウザの中だけ）。AIも見本の答えを返します。</div>
+
+  <!-- はじめの画面：ログイン -->
+  <section id="gate" class="card hide">
+    <h2>はじめに、ログインしてください</h2>
+    <p class="muted">サロンストックと同じアカウントで入ります。お店のカラー剤を読み込むためです。</p>
+    <div id="inApp" class="tip hide">LINE・Instagramなどの中のブラウザでは Googleログインができません。Safari（Chrome）で開くか、メールアドレスで入ってください。</div>
+    <button id="gGoogle" class="btn primary big" type="button" style="margin-top:8px">Googleでログイン</button>
+    <label class="f" for="gEmail">メールアドレスで入る</label>
+    <input id="gEmail" type="email" autocomplete="email" placeholder="メールアドレス">
+    <input id="gPass" type="password" autocomplete="current-password" placeholder="パスワード" style="margin-top:6px">
+    <div class="row" style="margin-top:8px"><button id="gLogin" class="btn" type="button">ログイン</button></div>
+    <p id="gMsg" class="bad small"></p>
+  </section>
+
+  <!-- お店を選ぶ -->
+  <section id="pick" class="card hide">
+    <h2>お店を選んでください</h2>
+    <div id="pickList" class="row"></div>
+    <p id="pickMsg" class="muted"></p>
+  </section>
+
+  <div id="app" class="hide">
+    <!-- ① 薬剤 -->
+    <section class="card">
+      <h2><span class="num">1</span>お店の薬剤</h2>
+      <p id="dyeSum" class="muted">読み込み中…</p>
+      <details id="dyeBox">
+        <summary>薬剤を見る・直す</summary>
+        <p class="muted small">サロンストックで種類が「カラー剤」の商品です。系統（ふつう／ノンジアミン／メイリーなど）は品名から自動で分けています。違うときは右の選択で直してください（お店のみんなに反映）。□を外すとレシピに使いません。</p>
+        <div id="dyeList"></div>
+        <div class="row" style="margin-top:10px">
+          <button id="dyeReload" class="btn" type="button">🔄 サロンストックから読み込み直す</button>
+        </div>
+        <details style="margin-top:10px">
+          <summary>＋ 手で薬剤を登録する</summary>
+          <input id="mName" type="text" placeholder="品名（例：オルディーブ アディクシー 7-SA）" style="margin-top:6px">
+          <div class="row" style="margin-top:6px">
+            <select id="mKind" aria-label="系統"></select>
+            <button id="mAdd" class="btn primary" type="button">登録</button>
+          </div>
+        </details>
+      </details>
+    </section>
+
+    <!-- ② 写真 -->
+    <section class="card">
+      <h2><span class="num">2</span>写真を2枚</h2>
+      <div class="photos">
+        <label class="ph" id="phWant"><input type="file" accept="image/*" data-ph="want"><span>🎨</span><b>なりたい色</b><span class="muted small">スクショでOK</span></label>
+        <label class="ph" id="phNow"><input type="file" accept="image/*" data-ph="now"><span>📷</span><b>今の髪</b><span class="muted small">撮る or 選ぶ</span></label>
+      </div>
+      <div class="tip">
+        <b>今の髪のきれいな撮り方（薄めに出るのを防ぐ）</b>
+        <ul>
+          <li>窓ぎわの明るい自然光で。<b>フラッシュは使わない</b>（明るく写りすぎる）</li>
+          <li><b>根元と毛先が両方</b>写るように、少し離れて後ろか横から</li>
+          <li>髪は乾いた状態で。濡れていると暗く写る</li>
+          <li>白い紙やタオルを横に置くと、色の見え方が正確になる</li>
+          <li>カメラのフィルター・美肌加工は切る</li>
+        </ul>
+        <b>なりたい色</b>：加工が強い写真は実物より明るいことが多いです。できれば光の自然な写真を。
+      </div>
+    </section>
+
+    <!-- ③ 一言 -->
+    <section class="card">
+      <h2><span class="num">3</span>お客様のこと・一言</h2>
+      <label class="f">使う系統</label>
+      <div class="seg" id="lineSeg">
+        <button type="button" data-line="any" class="on">おまかせ</button>
+        <button type="button" data-line="normal">ふつう</button>
+        <button type="button" data-line="nd">ノンジアミン</button>
+        <button type="button" data-line="mairy">メイリー</button>
+      </div>
+      <label class="f">白髪</label>
+      <div class="seg" id="graySeg">
+        <button type="button" data-gray="none" class="on">ほぼ無し</button>
+        <button type="button" data-gray="some">少し</button>
+        <button type="button" data-gray="many">多い</button>
+      </div>
+      <label class="f">履歴</label>
+      <div class="chips" id="histChips">
+        <button type="button" data-h="ブリーチ歴あり">ブリーチ歴あり</button>
+        <button type="button" data-h="黒染め歴あり">黒染め歴あり</button>
+        <button type="button" data-h="縮毛矯正・パーマあり">縮毛矯正・パーマあり</button>
+        <button type="button" data-h="毛先のダメージ多め">毛先のダメージ多め</button>
+      </div>
+      <label class="f" for="note">一言（なくてもOK）</label>
+      <textarea id="note" placeholder="例：もう少し濃いめ／赤みを抑えたい／前回すぐ色が抜けた"></textarea>
+      <div class="chips" id="noteChips">
+        <button type="button">もう少し濃いめ</button>
+        <button type="button">もう少し明るめ</button>
+        <button type="button">赤みを抑えたい</button>
+        <button type="button">色持ちを良くしたい</button>
+        <button type="button">根元だけ</button>
+      </div>
+      <button id="go" class="btn primary big" type="button" style="margin-top:14px">✨ レシピを出す</button>
+      <p id="goMsg" class="small"></p>
+    </section>
+
+    <!-- ④ 結果 -->
+    <section id="result" class="card res hide"></section>
+
+    <!-- これまで -->
+    <section class="card">
+      <h2>これまでのレシピ</h2>
+      <p id="biasSum" class="muted small"></p>
+      <div id="logs"><p class="muted">まだありません</p></div>
+    </section>
+
+    <section class="card">
+      <h2>設定</h2>
+      <p class="muted small">ログイン中：<span id="sUser"></span><br>お店のID：<code id="sSalon"></code> <button id="sCopy" class="btn small" type="button" style="padding:2px 8px">コピー</button><br>
+      （AIの中継所に、使ってよいお店としてこのIDを入れます）</p>
+      <label class="f" for="sAi">AIの中継所のアドレス</label>
+      <input id="sAi" type="text" placeholder="https://〜.workers.dev">
+      <p class="muted small">Cloudflare に作った中継所のアドレス。空のときは下の既定のアドレスを使います。</p>
+      <div class="row"><button id="sSave" class="btn" type="button">保存</button><button id="sLogout" class="btn" type="button">ログアウト</button></div>
+    </section>
+  </div>
+</main>
+<div id="toast"></div>
+
+<script>
+(() => {
+  'use strict';
+  // ==================== 基本 ====================
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  let toastT = 0;
+  const toast = (m) => { const t = $('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2600); };
+  const ls = { get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+
+  // 練習モード（このパソコンで ?demo を付けて開いたときだけ）：クラウドもAIも使わない
+  const DEMO = /^(localhost|127\.)/.test(location.hostname) && new URLSearchParams(location.search).has('demo');
+  // AIの中継所（Cloudflare Workers）。決まったらここに書く（鍵ではないので公開してよい）
+  const DEFAULT_AI_URL = '';
+  const FB = { apiKey: 'AIzaSyCXXj-QF-MHvDxMqgB5-qU60GBJ0aMYTDM', projectId: 'salon-stock-fbd9b' }; // サロンストックと同じ（公開用のキー）
+  const USER_KEY = 'salon-stock-user'; // サロンストックとログインを共有する（同じサイトなので、サロンストックで入っていればそのまま使える）
+  const SALON_KEY = 'color-recipe-salon';
+
+  const KINDS = { normal: 'ふつう', nd: 'ノンジアミン', mairy: 'メイリー', oxy: '2剤（オキシ）', bleach: 'ブリーチ', other: 'その他（使わない）' };
+  // 品名から系統を推測（違えば画面で直す）
+  function guessKind(name) {
+    const n = String(name || '');
+    if (/オキシ|オキシダン|２剤|2剤|第2剤|第二剤|ディベロッパー|デベロッパー|過酸化|\bOX\b|\d(\.\d)?\s*%/i.test(n)) return 'oxy';
+    if (/ブリーチ|ライトナー|脱色|bleach/i.test(n)) return 'bleach';
+    if (/ノンジアミン|ノン・ジアミン|non.?diamine|ジアミンフリー|ジアミン不使用/i.test(n)) return 'nd';
+    if (/メイリー|mairy|meiry/i.test(n)) return 'mairy';
+    return 'normal';
+  }
+
+  // ==================== ログイン（サロンストックと同じ仕組み） ====================
+  let user = ls.get(USER_KEY, null);
+  const authErr = (j) => {
+    const m = (j && j.error && j.error.message) || '';
+    return /EMAIL_NOT_FOUND|INVALID_PASSWORD|INVALID_LOGIN_CREDENTIALS/.test(m) ? 'メールアドレスかパスワードが違います'
+      : /INVALID_EMAIL/.test(m) ? 'メールアドレスの形が正しくありません'
+      : /TOO_MANY_ATTEMPTS/.test(m) ? '何度も失敗したため一時的にロックされています。しばらく待ってください'
+      : 'うまくいきませんでした（' + (m || '通信エラー') + '）';
+  };
+  const setUser = (j, email) => {
+    user = { uid: j.localId || j.user_id, email: email || j.email || (user && user.email), idToken: j.idToken || j.id_token, refreshToken: j.refreshToken || j.refresh_token, exp: Date.now() + Number(j.expiresIn || j.expires_in || 3600) * 1000 };
+    ls.set(USER_KEY, user);
+  };
+  async function token() {
+    if (DEMO) return 'demo';
+    if (!user) throw new Error('ログインしていません');
+    if (user.exp - 60000 > Date.now()) return user.idToken;
+    const r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${FB.apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(user.refreshToken) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error('ログインの期限が切れました。もう一度ログインしてください');
+    setUser(j, user.email);
+    return user.idToken;
+  }
+  const GSDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
+  let gAuthP = null, gAuth = null;
+  function googleAuth() {
+    return gAuthP || (gAuthP = (async () => {
+      const [app, au] = await Promise.all([import(GSDK + 'firebase-app.js'), import(GSDK + 'firebase-auth.js')]);
+      const a = app.initializeApp({ apiKey: FB.apiKey, authDomain: FB.projectId + '.firebaseapp.com', projectId: FB.projectId }, 'color-google');
+      const auth = au.initializeAuth(a, { persistence: au.inMemoryPersistence, popupRedirectResolver: au.browserPopupRedirectResolver });
+      return (gAuth = { au, auth });
+    })().catch(e => { gAuthP = null; throw e; }));
+  }
+  async function googleLogin() {
+    if (!gAuth) {
+      try { await googleAuth(); } catch (e) { throw new Error('ログインの部品を読み込めませんでした。電波を確認してください'); }
+      throw new Error('準備ができました。もう一度「Googleでログイン」を押してください');
+    }
+    const { au, auth } = gAuth;
+    const prov = new au.GoogleAuthProvider(); prov.setCustomParameters({ prompt: 'select_account' });
+    let cred;
+    try { cred = await au.signInWithPopup(auth, prov); } catch (e) {
+      const c = (e && e.code) || '';
+      throw new Error(/popup-closed|cancelled/.test(c) ? 'ログインをやめました' : /popup-blocked/.test(c) ? 'もう一度「Googleでログイン」を押してください'
+        : /unauthorized-domain/.test(c) ? 'Firebase の「承認済みドメイン」に ' + location.hostname + ' が入っていません' : 'Googleでログインできませんでした（' + (c || e.message) + '）');
+    }
+    const u = cred.user, t = await u.getIdTokenResult();
+    setUser({ localId: u.uid, idToken: t.token, refreshToken: u.refreshToken, expiresIn: Math.max(60, (Date.parse(t.expirationTime) - Date.now()) / 1000) }, u.email);
+    au.signOut(auth).catch(() => {});
+  }
+
+  // ==================== Firestore（REST） ====================
+  const BASE = `https://firestore.googleapis.com/v1/projects/${FB.projectId}/databases/(default)/documents`;
+  const toV = (v) => v === null || v === undefined ? { nullValue: null }
+    : v instanceof Date ? { timestampValue: v.toISOString() }
+    : typeof v === 'boolean' ? { booleanValue: v }
+    : typeof v === 'number' ? (Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v })
+    : typeof v === 'string' ? { stringValue: v }
+    : Array.isArray(v) ? { arrayValue: { values: v.map(toV) } }
+    : { mapValue: { fields: toF(v) } };
+  const toF = (o) => { const f = {}; for (const [k, v] of Object.entries(o)) if (v !== undefined) f[k] = toV(v); return f; };
+  const fromV = (v) => 'nullValue' in v ? null : 'booleanValue' in v ? v.booleanValue : 'integerValue' in v ? Number(v.integerValue)
+    : 'doubleValue' in v ? v.doubleValue : 'stringValue' in v ? v.stringValue : 'timestampValue' in v ? Date.parse(v.timestampValue)
+    : 'arrayValue' in v ? (v.arrayValue.values || []).map(fromV) : 'mapValue' in v ? fromF(v.mapValue.fields || {}) : null;
+  const fromF = (f) => { const o = {}; for (const [k, v] of Object.entries(f || {})) o[k] = fromV(v); return o; };
+  const docId = (name) => name.split('/').pop();
+  async function req(method, url, body) {
+    const r = await fetch(url, { method, headers: { Authorization: 'Bearer ' + await token(), 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    if (r.status === 404 && method === 'GET') return null;
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const m = (j.error && j.error.message) || ('HTTP ' + r.status);
+      throw new Error(/quota|RESOURCE_EXHAUSTED/i.test(m) || r.status === 429 ? 'クラウドの1日に使える量の上限です（夕方5時ごろに戻ります）'
+        : r.status === 403 ? '読み書きの許可がありません（Firestore のルールが古いかもしれません）' : m);
+    }
+    return j;
+  }
+  const getDoc = async (path) => { const j = await req('GET', `${BASE}/${path}`); return j ? { id: docId(j.name), ...fromF(j.fields) } : null; };
+  async function listDocs(path) {
+    const out = []; let page = '';
+    do {
+      const j = await req('GET', `${BASE}/${path}?pageSize=300${page ? '&pageToken=' + page : ''}`);
+      for (const d of (j && j.documents) || []) out.push({ id: docId(d.name), ...fromF(d.fields) });
+      page = j && j.nextPageToken;
+    } while (page);
+    return out;
+  }
+  const setDoc = (path, data, fields) => req('PATCH', `${BASE}/${path}` + (fields ? '?' + fields.map(f => 'updateMask.fieldPaths=' + f).join('&') : ''), { fields: toF(data) });
+
+  // ==================== データの置き場所 ====================
+  // 読むだけ：salons/{お店}/items（サロンストックの商品。種類＝カラー剤だけ使う）
+  // カラーレシピ専用：salons/{お店}/colorDyes/{ID}（系統の直し・使う/使わない・手で登録した薬剤）
+  //                  salons/{お店}/colorLogs/{ID}（出したレシピと「薄かった/ちょうど/濃かった」。写真は保存しない）
+  const DemoDB = (() => {
+    const K = 'color-recipe-demo-db';
+    const db = ls.get(K, null) || { dyes: {}, logs: {} };
+    const save = () => ls.set(K, db);
+    const items = [
+      ['4954835000011', 'オルディーブ アディクシー 7-SA サファイア 80g'], ['4954835000028', 'オルディーブ アディクシー 9-GR グレーパール 80g'],
+      ['4954835000035', 'オルディーブ アディクシー 5-AM アメジスト 80g'], ['4954835000042', 'オルディーブ 8-NB ナチュラルブラウン 80g'],
+      ['4954835000059', 'オルディーブ 6-NB ナチュラルブラウン 80g'], ['4954835000066', 'オルディーブ 10-CA クリスタルアッシュ 80g'],
+      ['4954835000073', 'オルディーブ オキシダン 3% 1000ml'], ['4954835000080', 'オルディーブ オキシダン 6% 1000ml'],
+      ['4900000000101', 'ノンジアミンカラー ベージュ 7 120g'], ['4900000000118', 'ノンジアミンカラー ブラウン 5 120g'],
+      ['4900000000125', 'ノンジアミンカラー アッシュ 8 120g'], ['4900000000132', 'メイリー カラー 7 ナチュラル 80g'],
+      ['4900000000149', 'ミルボン ディーセス ライトナー（ブリーチ）'],
+    ].map(([code, name]) => ({ id: code, name, cat: 'カラー剤' }));
+    return {
+      salons: async () => ({ demo: 'ネクスト（練習）' }),
+      items: async () => items,
+      dyes: async () => Object.values(db.dyes),
+      saveDye: async (d) => { db.dyes[d.id] = { ...d, at: Date.now() }; save(); },
+      logs: async () => Object.values(db.logs).sort((a, b) => b.at - a.at).slice(0, 40),
+      addLog: async (l) => { const id = 'L' + Date.now().toString(36); db.logs[id] = { ...l, id, at: Date.now() }; save(); return id; },
+      setFb: async (id, fb) => { if (db.logs[id]) { db.logs[id].fb = fb; db.logs[id].fbAt = Date.now(); save(); } },
+    };
+  })();
+  const CloudDB = {
+    salons: async () => { const u = await getDoc(`users/${user.uid}`); return (u && u.salons) || {}; },
+    items: async () => (await listDocs(`salons/${salon}/items`)).map(x => ({ id: x.id, name: x.name || '', cat: x.cat || '', off: !!x.off })),
+    dyes: async () => listDocs(`salons/${salon}/colorDyes`),
+    saveDye: async (d) => { await setDoc(`salons/${salon}/colorDyes/${d.id}`, { name: d.name, kind: d.kind, use: d.use !== false, src: d.src || 'stock', by: user.uid, at: new Date() }); },
+    logs: async () => {
+      const j = await req('POST', `${BASE}/salons/${salon}:runQuery`, { structuredQuery: { from: [{ collectionId: 'colorLogs' }], orderBy: [{ field: { fieldPath: 'at' }, direction: 'DESCENDING' }], limit: 40 } });
+      return (j || []).filter(x => x.document).map(x => ({ id: docId(x.document.name), ...fromF(x.document.fields) }));
+    },
+    addLog: async (l) => { const id = 'L' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); await setDoc(`salons/${salon}/colorLogs/${id}`, { ...l, by: user.uid, at: new Date() }); return id; },
+    setFb: async (id, fb) => { await setDoc(`salons/${salon}/colorLogs/${id}`, { fb, fbAt: new Date(), at: new Date() }, ['fb', 'fbAt', 'at']); },
+  };
+  const DB = DEMO ? DemoDB : CloudDB;
+  if (DEMO) { user = { uid: 'demo', email: 'demo（練習）' }; $('demoBanner').classList.remove('hide'); }
+
+  // ==================== 画面の状態 ====================
+  let salon = '', salons = {};
+  let stock = [];      // サロンストックのカラー剤
+  let dyeEdits = {};   // colorDyes（直し・手で登録）
+  let logs = [];
+  const photos = { want: null, now: null }; // { media_type, data(base64), url }
+  let line = 'any', gray = 'none';
+  const hist = new Set();
+  let current = null; // 今出ているレシピ { id, recipe }
+
+  const itemsKey = () => `color-recipe-items${DEMO ? '-demo' : ''}:${salon}`;
+  // 薬剤の一覧（サロンストック＋直し＋手で登録）
+  function allDyes() {
+    const out = [];
+    for (const it of stock) {
+      const e = dyeEdits[it.id] || {};
+      out.push({ id: it.id, name: it.name || '（品名なし）', kind: e.kind || guessKind(it.name), use: e.use !== false, src: 'stock', edited: !!e.kind });
+    }
+    for (const e of Object.values(dyeEdits)) if (e.src === 'manual') out.push({ id: e.id, name: e.name, kind: e.kind || guessKind(e.name), use: e.use !== false, src: 'manual' });
+    return out;
+  }
+
+  // ==================== 起動 ====================
+  async function start() {
+    if (!user) return show('gate');
+    try { salons = await DB.salons(); } catch (e) { $('pickMsg').textContent = 'お店の一覧が読めませんでした：' + e.message; return show('pick'); }
+    const ids = Object.keys(salons);
+    let ssSalon = ''; try { ssSalon = localStorage.getItem(USER_KEY + ':salon') || ''; } catch (e) {} // サロンストックで選んでいるお店
+    const saved = ls.get(SALON_KEY, '') || ssSalon;
+    if (!ids.length) { $('pickMsg').textContent = 'このアカウントにはお店がありません。先にサロンストックでお店を作るか、招待コードで参加してください。'; $('pickList').innerHTML = '<a class="btn" href="../salon-stock/">サロンストックを開く</a>'; return show('pick'); }
+    if (ids.includes(saved)) return choose(saved);
+    if (ids.length === 1) return choose(ids[0]);
+    $('pickList').innerHTML = ids.map(id => `<button class="btn" data-pick="${esc(id)}">${esc(salons[id])}</button>`).join('');
+    show('pick');
+  }
+  function show(which) {
+    ['gate', 'pick', 'app'].forEach(x => $(x).classList.toggle('hide', x !== which));
+    $('salonChip').classList.toggle('hide', which !== 'app');
+  }
+  async function choose(id) {
+    salon = id; ls.set(SALON_KEY, id);
+    $('salonChip').textContent = (salons[id] || id) + ' ▾';
+    $('sUser').textContent = user.email || user.uid; $('sSalon').textContent = id;
+    $('sAi').value = ls.get('color-recipe-ai', '') || '';
+    show('app');
+    const cache = ls.get(itemsKey(), null);
+    if (cache && cache.items) stock = cache.items;
+    renderDyes();
+    await Promise.all([
+      (!cache || Date.now() - cache.at > 24 * 3600e3) ? loadStock().catch(e => toast(e.message)) : null,
+      DB.dyes().then(list => { dyeEdits = Object.fromEntries(list.map(d => [d.id, d])); }).catch(e => toast('薬剤の直しが読めません：' + e.message)),
+      loadLogs(),
+    ]);
+    renderDyes();
+  }
+  // サロンストックの在庫から読み込む（読み取り回数を減らすため、1日1回かボタンを押したときだけ）
+  async function loadStock() {
+    $('dyeSum').textContent = 'サロンストックから読み込み中…';
+    const items = await DB.items();
+    stock = items.filter(x => x.cat === 'カラー剤' && !x.off).map(x => ({ id: x.id, name: x.name }));
+    ls.set(itemsKey(), { at: Date.now(), items: stock });
+    renderDyes();
+  }
+  async function loadLogs() {
+    try { logs = await DB.logs(); } catch (e) { logs = []; $('logs').innerHTML = `<p class="bad small">読み込めませんでした：${esc(e.message)}</p>`; return; }
+    renderLogs();
+  }
+
+  // ==================== ① 薬剤 ====================
+  function renderDyes() {
+    const ds = allDyes();
+    const cnt = (k) => ds.filter(d => d.use && d.kind === k).length;
+    $('dyeSum').innerHTML = ds.length
+      ? `使える薬剤：ふつう <b>${cnt('normal')}</b>・ノンジアミン <b>${cnt('nd')}</b>・メイリー <b>${cnt('mairy')}</b>・2剤 <b>${cnt('oxy')}</b>・ブリーチ <b>${cnt('bleach')}</b>`
+        + (cnt('oxy') ? '' : '<br><span class="warn">2剤（オキシ）が見つかりません。サロンストックで種類を「カラー剤」にするか、手で登録してください。</span>')
+      : 'カラー剤がまだありません。サロンストックで種類を「カラー剤」にした商品が出ます。手で登録もできます。';
+    const opts = (cur) => Object.entries(KINDS).map(([k, v]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${v}</option>`).join('');
+    const order = ['normal', 'nd', 'mairy', 'oxy', 'bleach', 'other'];
+    $('dyeList').innerHTML = ds.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || a.name.localeCompare(b.name, 'ja'))
+      .map(d => `<div class="dye"><input type="checkbox" data-use="${esc(d.id)}" ${d.use ? 'checked' : ''} aria-label="使う">
+        <div class="nm">${esc(d.name)} ${d.src === 'manual' ? '<span class="tag">手で登録</span>' : ''}</div>
+        <select data-kind="${esc(d.id)}" aria-label="系統">${opts(d.kind)}</select></div>`).join('');
+    $('mKind').innerHTML = opts('normal');
+  }
+  async function editDye(id, patch) {
+    const d = allDyes().find(x => x.id === id); if (!d) return;
+    const next = { id, name: d.name, kind: d.kind, use: d.use, src: d.src, ...patch };
+    dyeEdits[id] = { ...(dyeEdits[id] || {}), ...next };
+    renderDyes();
+    try { await DB.saveDye(next); } catch (e) { toast('保存できませんでした：' + e.message); }
+  }
+  $('dyeList').addEventListener('change', e => {
+    const t = e.target;
+    if (t.dataset.use) editDye(t.dataset.use, { use: t.checked });
+    else if (t.dataset.kind) editDye(t.dataset.kind, { kind: t.value });
+  });
+  $('dyeReload').addEventListener('click', async e => { e.target.disabled = true; try { await loadStock(); toast('読み込みました'); } catch (x) { toast(x.message); } finally { e.target.disabled = false; } });
+  $('mName').addEventListener('input', () => { $('mKind').value = guessKind($('mName').value); });
+  $('mAdd').addEventListener('click', async () => {
+    const name = $('mName').value.trim(); if (!name) return toast('品名を入れてください');
+    const d = { id: 'M' + Date.now().toString(36), name: name.slice(0, 80), kind: $('mKind').value, use: true, src: 'manual' };
+    dyeEdits[d.id] = d; $('mName').value = ''; renderDyes();
+    try { await DB.saveDye(d); toast('登録しました'); } catch (e) { toast('保存できませんでした：' + e.message); }
+  });
+
+  // ==================== ② 写真（小さくしてから送る：料金と通信量を減らす） ====================
+  function shrink(file) {
+    return new Promise((res, rej) => {
+      const img = new Image(), url = URL.createObjectURL(file);
+      img.onload = () => {
+        const max = 1280, k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        const du = c.toDataURL('image/jpeg', 0.85); URL.revokeObjectURL(url);
+        res({ media_type: 'image/jpeg', data: du.split(',')[1], url: du });
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('写真が読めませんでした（HEICなどは、スクショにするか別の形式で）')); };
+      img.src = url;
+    });
+  }
+  document.querySelectorAll('.ph input').forEach(inp => inp.addEventListener('change', async () => {
+    const f = inp.files && inp.files[0]; if (!f) return;
+    const box = inp.parentElement;
+    try {
+      const p = await shrink(f); photos[inp.dataset.ph] = p;
+      box.querySelectorAll('img').forEach(x => x.remove());
+      const im = document.createElement('img'); im.src = p.url; im.alt = ''; box.insertBefore(im, box.children[1]);
+      box.querySelector('span').classList.add('hide');
+    } catch (e) { toast(e.message); }
+    inp.value = '';
+  }));
+
+  // ==================== ③ 一言 ====================
+  const seg = (id, set) => $(id).addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    $(id).querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); set(b);
+  });
+  seg('lineSeg', b => { line = b.dataset.line; });
+  seg('graySeg', b => { gray = b.dataset.gray; });
+  $('histChips').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; hist.has(b.dataset.h) ? hist.delete(b.dataset.h) : hist.add(b.dataset.h); b.classList.toggle('on'); b.style.outline = hist.has(b.dataset.h) ? '2px solid var(--accent)' : ''; });
+  $('noteChips').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; const n = $('note'); n.value = (n.value.trim() ? n.value.trim() + '／' : '') + b.textContent; });
+
+  // 店ごとの補正：最近20件の「薄かった/ちょうど/濃かった」を数える（ノンジアミンとそれ以外は別に）
+  const group = (l) => l === 'nd' ? 'nd' : 'other';
+  function biasFor(lineChoice) {
+    const g = lineChoice === 'any' ? null : group(lineChoice);
+    const r = { thin: 0, ok: 0, thick: 0 };
+    logs.filter(x => x.fb && (!g || group(x.line) === g)).slice(0, 20).forEach(x => { r[x.fb] = (r[x.fb] || 0) + 1; });
+    return r;
+  }
+
+  // ==================== ④ レシピを出す ====================
+  const aiUrl = () => (ls.get('color-recipe-ai', '') || DEFAULT_AI_URL).trim();
+  $('go').addEventListener('click', async () => {
+    const msg = $('goMsg'); msg.className = 'small bad';
+    if (!photos.want || !photos.now) { msg.textContent = '写真を2枚（なりたい色・今の髪）入れてください'; return; }
+    const dyes = allDyes().filter(d => d.use && d.kind !== 'other' && (line === 'any' || d.kind === line || d.kind === 'oxy' || d.kind === 'bleach'));
+    if (!dyes.some(d => ['normal', 'nd', 'mairy'].includes(d.kind))) { msg.textContent = 'この系統で使える1剤がありません。①の薬剤を確認してください'; return; }
+    const body = { salon, line, gray, history: [...hist].join('、') || 'なし', note: $('note').value.trim().slice(0, 300), bias: biasFor(line),
+      dyes: dyes.map(d => ({ id: d.id, name: d.name, kind: d.kind })), images: [photos.want, photos.now].map(p => ({ media_type: p.media_type, data: p.data })) };
+    const btn = $('go'); btn.disabled = true; msg.className = 'small muted'; msg.innerHTML = '<span class="spinner"></span> AIが写真を見ています…（10〜30秒）';
+    try {
+      let recipe;
+      if (DEMO && !aiUrl()) { await new Promise(r => setTimeout(r, 900)); recipe = sampleRecipe(body.dyes, line); }
+      else {
+        if (!aiUrl()) throw new Error('AIの中継所がまだ設定されていません（下の「設定」）');
+        const r = await fetch(aiUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await token() }, body: JSON.stringify(body) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || ('うまくいきませんでした（' + r.status + '）'));
+        recipe = j.recipe;
+      }
+      const known = new Set(body.dyes.map(d => d.id));
+      const log = { line: recipe.line || line, req: { line, gray, history: body.history, note: body.note }, recipe: JSON.stringify(recipe).slice(0, 20000), fb: '' };
+      let id = ''; try { id = await DB.addLog(log); } catch (e) { toast('レシピの保存ができませんでした：' + e.message); }
+      current = { id, recipe, known };
+      if (id) { logs.unshift({ ...log, id, at: Date.now(), by: user.uid }); renderLogs(); }
+      renderResult(); msg.textContent = '';
+      $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) { msg.className = 'small bad'; msg.textContent = e.message; }
+    finally { btn.disabled = false; }
+  });
+
+  const LINE_JA = { normal: 'ふつう（ジアミン）', nd: 'ノンジアミン', mairy: 'メイリー' };
+  function stepHtml(title, s, known) {
+    if (!s) return '';
+    const rows = (s.mix || []).map(m => `<tr><td>${esc(m.name)}${known && !known.has(m.dyeId) ? ' <span class="bad small">⚠️店のリストに無い</span>' : ''}</td><td class="g">${esc(m.grams)}g</td></tr>`).join('');
+    const total = (s.mix || []).reduce((a, m) => a + (Number(m.grams) || 0), 0);
+    return `<h3>${title}</h3><table>${rows}<tr><td class="muted">1剤の合計</td><td class="g">${Math.round(total)}g</td></tr></table>
+      <div class="kv"><b>オキシ</b><span>${esc(s.oxyPercent)}%（1剤:2剤 = ${esc(s.oxyRatio)}）</span><b>放置</b><span>${esc(s.minutes)}分</span></div>
+      ${s.note ? `<p class="small">${esc(s.note)}</p>` : ''}`;
+  }
+  function renderResult() {
+    const { recipe: r, known, id } = current; const el = $('result');
+    const log = logs.find(x => x.id === id);
+    el.innerHTML = `<h2><span class="num">4</span>レシピ <span class="tag">${esc(LINE_JA[r.line] || '')}</span> <span class="tag">確からしさ：${{ high: '高い', mid: 'ふつう', low: '低い' }[r.confidence] || '-'}</span></h2>
+      <div class="kv"><b>今の髪</b><span>${esc(r.current)}</span><b>なりたい色</b><span>${esc(r.target)}</span></div>
+      <p>${esc(r.plan)}</p>
+      ${stepHtml(r.endsSameAsRoot ? '根元〜毛先（全体）' : '根元', r.root, known)}
+      ${r.endsSameAsRoot ? '' : stepHtml('毛先', r.ends, known)}
+      ${(r.warnings || []).length ? `<h3>気をつけること</h3><ul>${r.warnings.map(w => `<li class="warn">${esc(w)}</li>`).join('')}</ul>` : ''}
+      <div class="safety">⚠️ これはAIの提案です。<b>最終判断は美容師</b>がしてください。<br>カラーの前に、毎回<b>パッチテスト（皮膚アレルギー試験）</b>を行ってください。ノンジアミンでもかぶれることがあります。</div>
+      <h3>使ってみてどうだった？</h3>
+      <p class="muted small">押すと、この店の次のレシピから自動で補正します。あとからでも押せます（下の「これまでのレシピ」）。</p>
+      <div class="fb" data-fbfor="${esc(id)}">${fbButtons(log && log.fb)}</div>`;
+    el.classList.remove('hide');
+  }
+  const fbButtons = (cur) => [['thin', '薄かった'], ['ok', 'ちょうど'], ['thick', '濃かった']].map(([k, v]) => `<button type="button" data-fb="${k}" class="${cur === k ? 'on' : ''}">${v}</button>`).join('');
+  document.addEventListener('click', async e => {
+    const b = e.target.closest('[data-fb]'); if (!b) return;
+    const box = b.closest('[data-fbfor]'), id = box && box.dataset.fbfor;
+    if (!id) return toast('このレシピは保存できていないので、結果を残せません');
+    const log = logs.find(x => x.id === id); const fb = log && log.fb === b.dataset.fb ? '' : b.dataset.fb;
+    try { await DB.setFb(id, fb); if (log) log.fb = fb; document.querySelectorAll(`[data-fbfor="${CSS.escape(id)}"]`).forEach(x => { x.innerHTML = fbButtons(fb); }); renderLogs(); toast(fb ? '記録しました。次から補正します' : '取り消しました'); }
+    catch (x) { toast('保存できませんでした：' + x.message); }
+  });
+
+  // ==================== これまで ====================
+  function renderLogs() {
+    const b = biasFor('normal'), n = biasFor('nd');
+    const t = (r) => `薄かった ${r.thin}・ちょうど ${r.ok}・濃かった ${r.thick}`;
+    $('biasSum').textContent = `この店の補正（最近20件）：ふつう系 ${t(b)}／ノンジアミン ${t(n)}`;
+    if (!logs.length) { $('logs').innerHTML = '<p class="muted">まだありません</p>'; return; }
+    $('logs').innerHTML = logs.slice(0, 15).map(l => {
+      let r = {}; try { r = JSON.parse(l.recipe || '{}'); } catch (e) {}
+      const d = new Date(l.at || 0);
+      const mix = r.root && r.root.mix ? r.root.mix.map(m => `${m.name} ${m.grams}g`).join(' ＋ ') : '';
+      return `<div class="log"><div><b>${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}</b> <span class="tag">${esc(LINE_JA[l.line] || '')}</span> ${esc(r.target || '')}</div>
+        <div class="muted small">${esc(mix)}${r.root ? `（${esc(r.root.oxyPercent)}%・${esc(r.root.minutes)}分）` : ''}${l.req && l.req.note ? '／一言：' + esc(l.req.note) : ''}</div>
+        <div class="fb" data-fbfor="${esc(l.id)}">${fbButtons(l.fb)}</div></div>`;
+    }).join('');
+  }
+
+  // 練習モードの見本の答え（AIを使わずに画面を確かめる用）
+  function sampleRecipe(dyes, ln) {
+    const pick = (k) => dyes.filter(d => d.kind === k);
+    const kind = ln === 'any' ? 'normal' : ln;
+    const one = pick(kind).length ? pick(kind) : pick('normal');
+    const ox = pick('oxy');
+    const a = one[0], b = one[1] || one[0];
+    return { current: '7レベルくらい。根元2cmが地毛（4レベル）、毛先は赤みが出ている', target: '8レベルくらいの、赤みをおさえたグレージュ', line: kind,
+      plan: '根元は明るさを上げながら色を入れ、毛先は明るさを上げずに赤みを打ち消す色だけ入れる。前に薄めに出たので少し濃いめにしている（見本の答えです）',
+      root: { mix: [{ dyeId: a.id, name: a.name, grams: 30 }, { dyeId: b.id, name: b.name, grams: 10 }], oxyPercent: 6, oxyRatio: '1:1', minutes: 25, note: ox[0] ? ox[0].name + ' を使う' : '' },
+      ends: { mix: [{ dyeId: b.id, name: b.name, grams: 40 }], oxyPercent: 3, oxyRatio: '1:1', minutes: 15, note: '根元を塗って10分たってから毛先に塗る' },
+      endsSameAsRoot: false, warnings: ['毛先はダメージで色が入りやすいので、時間を見ながら流す'], confidence: 'mid' };
+  }
+
+  // ==================== ログイン画面・設定 ====================
+  const IN_APP = /( Line\/|FBAN|FBAV|FB_IAB|Instagram|KAKAOTALK|GSA\/|Twitter|MicroMessenger|YJApp|TikTok)/i.test(navigator.userAgent);
+  if (IN_APP) $('inApp').classList.remove('hide');
+  const busy = async (btn, fn) => { btn.disabled = true; $('gMsg').textContent = ''; try { await fn(); } catch (e) { $('gMsg').textContent = e.message; } finally { btn.disabled = false; } };
+  $('gGoogle').addEventListener('pointerdown', () => { if (!DEMO) googleAuth().catch(() => {}); });
+  if (!user && !DEMO) googleAuth().catch(() => {});
+  $('gGoogle').addEventListener('click', e => busy(e.currentTarget, async () => { if (IN_APP) throw new Error('このブラウザではGoogleログインができません。Safari（Chrome）で開くか、メールアドレスで入ってください'); await googleLogin(); toast('ログインしました'); await start(); }));
+  $('gLogin').addEventListener('click', e => busy(e.target, async () => {
+    const email = $('gEmail').value.trim(), pass = $('gPass').value;
+    const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${FB.apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: pass, returnSecureToken: true }) });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(authErr(j));
+    setUser(j, email); $('gPass').value = ''; toast('ログインしました'); await start();
+  }));
+  $('pickList').addEventListener('click', e => { const b = e.target.closest('[data-pick]'); if (b) choose(b.dataset.pick); });
+  $('salonChip').addEventListener('click', () => {
+    if (Object.keys(salons).length < 2) return toast('お店はひとつだけです');
+    $('pickList').innerHTML = Object.entries(salons).map(([id, n]) => `<button class="btn${id === salon ? ' on' : ''}" data-pick="${esc(id)}">${id === salon ? '✓ ' : ''}${esc(n)}</button>`).join('');
+    $('pickMsg').textContent = ''; show('pick');
+  });
+  $('sCopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(salon); toast('コピーしました'); } catch (e) { prompt('お店のID', salon); } });
+  $('sSave').addEventListener('click', () => { const v = $('sAi').value.trim(); if (v && !/^https:\/\/|^http:\/\/(localhost|127\.)/.test(v)) return toast('https:// から始まるアドレスを入れてください'); ls.set('color-recipe-ai', v); toast('保存しました'); });
+  $('sLogout').addEventListener('click', () => {
+    if (DEMO) return toast('練習モードではログアウトしません');
+    if (!confirm('ログアウトしますか？（同じスマホのサロンストックもログアウトになります）')) return;
+    user = null; try { localStorage.removeItem(USER_KEY); } catch (e) {} show('gate');
+  });
+
+  start();
+})();
+</script>
+</body>
+</html>

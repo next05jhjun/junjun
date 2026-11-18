@@ -113,6 +113,26 @@ service cloud.firestore {
       match /settings/{id} {
         allow read, write: if canMoney(s);
       }
+
+      // ---------- カラーレシピ（color-recipe/） ----------
+      // 薬剤の系統の直し・使う／使わない・手で登録した薬剤（メンバー全員）
+      match /colorDyes/{id} {
+        allow read: if isMember(s);
+        allow write: if isMember(s)
+          && request.resource.data.keys().hasOnly(['name', 'kind', 'use', 'src', 'by', 'at'])
+          && request.resource.data.by == request.auth.uid
+          && request.resource.data.name is string && request.resource.data.name.size() <= 80
+          && request.resource.data.kind in ['normal', 'nd', 'mairy', 'oxy', 'bleach', 'other'];
+      }
+      // 出したレシピと「薄かった／ちょうど／濃かった」（写真は保存しない）
+      match /colorLogs/{id} {
+        allow read: if isMember(s);
+        allow create: if isMember(s)
+          && request.resource.data.by == request.auth.uid
+          && request.resource.data.recipe is string && request.resource.data.recipe.size() <= 20000;
+        allow update: if isMember(s) && onlyChanges(['fb', 'fbAt', 'at'])
+          && request.resource.data.fb in ['', 'thin', 'ok', 'thick'];
+      }
     }
 
     // ---------- それ以外はすべて禁止 ----------
