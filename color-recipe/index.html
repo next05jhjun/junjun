@@ -229,7 +229,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   // 練習モード（このパソコンで ?demo を付けて開いたときだけ）：クラウドもAIも使わない
   const DEMO = /^(localhost|127\.)/.test(location.hostname) && new URLSearchParams(location.search).has('demo');
   // AIの中継所（Cloudflare Workers）。決まったらここに書く（鍵ではないので公開してよい）
-  const DEFAULT_AI_URL = '';
+  const DEFAULT_AI_URL = 'https://color-recipe.next05-j-h.workers.dev';
   const FB = { apiKey: 'AIzaSyCXXj-QF-MHvDxMqgB5-qU60GBJ0aMYTDM', projectId: 'salon-stock-fbd9b' }; // サロンストックと同じ（公開用のキー）
   const USER_KEY = 'salon-stock-user'; // サロンストックとログインを共有する（同じサイトなので、サロンストックで入っていればそのまま使える）
   const SALON_KEY = 'color-recipe-salon';
@@ -539,7 +539,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     const btn = $('go'); btn.disabled = true; msg.className = 'small muted'; msg.innerHTML = '<span class="spinner"></span> AIが写真を見ています…（10〜30秒）';
     try {
       let recipe;
-      if (DEMO && !aiUrl()) { await new Promise(r => setTimeout(r, 900)); recipe = sampleRecipe(body.dyes, line); }
+      if (DEMO && !ls.get('color-recipe-ai', '')) { /* 練習モードは見本の答え */ await new Promise(r => setTimeout(r, 900)); recipe = sampleRecipe(body.dyes, line); }
       else {
         if (!aiUrl()) throw new Error('AIの中継所がまだ設定されていません（下の「設定」）');
         const r = await fetch(aiUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await token() }, body: JSON.stringify(body) });
@@ -558,6 +558,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     finally { btn.disabled = false; }
   });
 
+  const noId = (s) => String(s ?? '').replace(/[（(]\s*id[:：\s]*[A-Za-z0-9]+\s*[)）]/gi, '').replace(/\bid[:：]\s*[A-Za-z0-9]{6,}/gi, '');
   const LINE_JA = { normal: 'ふつう（ジアミン）', nd: 'ノンジアミン', mairy: 'メイリー' };
   function stepHtml(title, s, known) {
     if (!s) return '';
@@ -565,17 +566,17 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     const total = (s.mix || []).reduce((a, m) => a + (Number(m.grams) || 0), 0);
     return `<h3>${title}</h3><table>${rows}<tr><td class="muted">1剤の合計</td><td class="g">${Math.round(total)}g</td></tr></table>
       <div class="kv"><b>オキシ</b><span>${esc(s.oxyPercent)}%（1剤:2剤 = ${esc(s.oxyRatio)}）</span><b>放置</b><span>${esc(s.minutes)}分</span></div>
-      ${s.note ? `<p class="small">${esc(s.note)}</p>` : ''}`;
+      ${s.note ? `<p class="small">${esc(noId(s.note))}</p>` : ''}`;
   }
   function renderResult() {
     const { recipe: r, known, id } = current; const el = $('result');
     const log = logs.find(x => x.id === id);
     el.innerHTML = `<h2><span class="num">4</span>レシピ <span class="tag">${esc(LINE_JA[r.line] || '')}</span> <span class="tag">確からしさ：${{ high: '高い', mid: 'ふつう', low: '低い' }[r.confidence] || '-'}</span></h2>
       <div class="kv"><b>今の髪</b><span>${esc(r.current)}</span><b>なりたい色</b><span>${esc(r.target)}</span></div>
-      <p>${esc(r.plan)}</p>
+      <p>${esc(noId(r.plan))}</p>
       ${stepHtml(r.endsSameAsRoot ? '根元〜毛先（全体）' : '根元', r.root, known)}
       ${r.endsSameAsRoot ? '' : stepHtml('毛先', r.ends, known)}
-      ${(r.warnings || []).length ? `<h3>気をつけること</h3><ul>${r.warnings.map(w => `<li class="warn">${esc(w)}</li>`).join('')}</ul>` : ''}
+      ${(r.warnings || []).length ? `<h3>気をつけること</h3><ul>${r.warnings.map(w => `<li class="warn">${esc(noId(w))}</li>`).join('')}</ul>` : ''}
       <div class="safety">⚠️ これはAIの提案です。<b>最終判断は美容師</b>がしてください。<br>カラーの前に、毎回<b>パッチテスト（皮膚アレルギー試験）</b>を行ってください。ノンジアミンでもかぶれることがあります。</div>
       <h3>使ってみてどうだった？</h3>
       <p class="muted small">押すと、この店の次のレシピから自動で補正します。あとからでも押せます（下の「これまでのレシピ」）。</p>
