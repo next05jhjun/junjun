@@ -182,6 +182,9 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   body.record-only .money, body.record-only nav button[data-tab="total"] { display: none !important; }
   .sync-warn { margin: 8px 12px 0; padding: 8px 10px; border-radius: 8px; background: #fff4d6; color: #5a4300; font-size: 13px; }
   #cloudIn.listerr details.start { display: none; }
+  .line-btn { background: #06c755 !important; color: #fff !important; border-color: #06c755 !important; font-weight: bold; }
+  .low-bar { position: fixed; top: 8px; left: 12px; right: 12px; max-width: 520px; margin: 0 auto; z-index: 50; padding: 10px 12px; border-radius: 10px; background: #ffe9e9; color: #7a1d1d; font-size: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+  .low-bar .btns { margin-top: 6px; }
   .salon-chip::after { content: ' ▾'; }
   .salon-menu { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; padding: 70px 16px 16px; }
   .salon-menu > div { background: var(--card); color: var(--text); border-radius: 12px; padding: 12px; width: 100%; max-width: 420px; box-shadow: 0 8px 30px rgba(0,0,0,.25); }
@@ -193,7 +196,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
 </head>
 <body>
 <header>
-  <h1>ツミケシ <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 5.0</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>ツミケシ <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 5.1</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -204,6 +207,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   </nav>
 </header>
 <div id="syncWarn" class="sync-warn" style="display:none"></div>
+<div id="lowBar" class="low-bar" style="display:none"></div>
 
 <main>
   <!-- ① 数える -->
@@ -413,6 +417,10 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       <h2>発注の目安</h2>
       <p class="muted">「一覧」で発注点（これ以下になったら頼む数）を入れた商品のうち、残りが発注点以下のものです。</p>
       <div id="orderList"></div>
+      <div class="btns" id="orderBtns" style="display:none">
+        <button class="btn line-btn" data-lineorder>LINEで送る</button>
+        <button class="btn" data-copyorder>文をコピー</button>
+      </div>
     </div>
     <div class="card">
       <h2>これまでの材料費</h2>
@@ -1947,11 +1955,12 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     $('supplierSum').innerHTML = Object.keys(bySup).length
       ? '<div class="muted">今期の仕入先ごとの金額</div><div class="catsum">' + Object.entries(bySup).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span>${esc(k)}：${yen(v)}</span>`).join('') + '</div>' : '';
     // 発注の目安
-    const need = all.filter(t => t.min != null && (t.counted ? t.qty : (t.book ?? 0)) <= t.min);
+    const need = lowItems(all);
+    $('orderBtns').style.display = need.length ? '' : 'none';
     $('orderList').innerHTML = need.length
       ? '<div class="table-wrap"><table><tr><th>商品</th><th class="num">残り</th><th class="num">発注点</th><th></th></tr>' + need.map(t => `
         <tr><td>${t.cat ? `<span class="cat-tag">${esc(t.cat)}</span>` : ''}${esc(t.name)}</td>
-        <td class="num minus">${t.counted ? t.qty : (t.book ?? 0)}</td><td class="num">${t.min}</td>
+        <td class="num minus">${stockNow(t)}</td><td class="num">${t.min}</td>
         <td><a class="muted" href="${affLink('https://search.rakuten.co.jp/search/mall/' + encodeURIComponent(t.name.startsWith('（') ? t.code : t.name) + '/')}" target="_blank" rel="noopener sponsored">楽天（PR）</a></td></tr>`).join('') + '</table></div>'
       : '<p class="muted">今のところ、発注が必要な商品はありません。</p>';
     // これまでの材料費
@@ -2216,6 +2225,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   $('oSave').addEventListener('click', () => {
     const d = state.oDraft;
     if (!d.lines.length) { toast('商品がありません'); return; }
+    const lowBefore = new Set(lowItems().map(t => t.code));
     const o = { id: 'o' + Date.now().toString(36), date: d.date || today(), type: d.type === 'use' ? 'use' : 'sale', customer: d.type === 'use' ? '' : (d.customer || '').trim(),
       lines: d.lines.map(l => ({ code: l.code, qty: Number(l.qty) || 0, sell: l.sell === '' ? '' : Number(l.sell) })), disc: d.type === 'use' ? 0 : (Number(d.disc) || 0), created: Date.now() };
     state.outs.push(o);
@@ -2223,6 +2233,42 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     state.oDraft = { date: today(), type: o.type, customer: '', lines: [] };
     save(); renderOut();
     toast(o.type === 'sale' ? `販売を記録しました（${yen(outAmount(o))}＋税）` : '材料の使用を記録しました');
+    const crossed = lowItems().filter(t => !lowBefore.has(t.code)); // この出庫で発注点を切った商品
+    if (crossed.length) showLowBar(crossed);
+  });
+
+  // ========== 発注のお知らせ（LINEで送る） ==========
+  // 今の残り：数えていない商品は帳簿の数。数えた商品は、数えたあとの入庫を足し、出庫を引く
+  function stockNow(t) {
+    if (!t.counted) return t.book ?? 0;
+    const c = state.counts[t.code]; if (!c) return t.qty;
+    const at = c.updated || 0; let q = t.qty;
+    for (const r of periodReceipts()) if (r.created > at) for (const l of r.lines) if (l.code === t.code) q += Number(l.qty) || 0;
+    for (const o of periodOuts()) if (o.created > at) for (const l of o.lines) if (l.code === t.code) q -= Number(l.qty) || 0;
+    return q;
+  }
+  // 発注点を入れた商品（「頼まない」は除く）のうち、残りが発注点以下のもの
+  function lowItems(all = buildTotal()) { return all.filter(t => t.min != null && t.min >= 0 && stockNow(t) <= t.min); }
+  function orderText(list) {
+    const shop = ($('salonChip').textContent || '').trim(), sup = supplierOf(), g = {};
+    for (const t of list) (g[sup[t.code] || '仕入先なし'] = g[sup[t.code] || '仕入先なし'] || []).push(t);
+    return `【ツミケシ】発注のお知らせ${shop ? '（' + shop + '）' : ''}　${md(today())}\n`
+      + Object.keys(g).sort((a, b) => (a === '仕入先なし') - (b === '仕入先なし') || a.localeCompare(b, 'ja')).map(k => `\n■ ${k}\n` + g[k].map(t => `・${t.name}　残り${stockNow(t)}（発注点${t.min}）`).join('\n')).join('\n');
+  }
+  // LINEの「送る相手を選ぶ」画面を開く（自分・仕入先・スタッフのグループなど）
+  const openLine = (text) => { location.href = 'https://line.me/R/share?text=' + encodeURIComponent(text); };
+  function showLowBar(list) {
+    const names = list.slice(0, 3).map(t => t.name).join('、') + (list.length > 3 ? ` ほか${list.length - 3}品目` : '');
+    $('lowBar').innerHTML = `⚠️ <b>発注点を切りました</b>：${esc(names)}<div class="btns"><button class="btn line-btn" data-lineorder>LINEで送る</button><button class="btn" data-lowclose>閉じる</button></div>`;
+    $('lowBar').style.display = '';
+  }
+  document.addEventListener('click', async e => {
+    const b = e.target.closest && e.target.closest('[data-lineorder],[data-copyorder],[data-lowclose]'); if (!b) return;
+    if (b.dataset.lowclose !== undefined) { $('lowBar').style.display = 'none'; return; }
+    const list = lowItems(); if (!list.length) { toast('発注点以下の商品はありません'); return; }
+    const text = orderText(list);
+    if (b.dataset.copyorder !== undefined) { try { await navigator.clipboard.writeText(text); toast('コピーしました'); } catch (err) { prompt('この文をコピーしてください', text); } return; }
+    $('lowBar').style.display = 'none'; openLine(text);
   });
   $('oClear').addEventListener('click', () => {
     if (!state.oDraft.lines.length) return;
