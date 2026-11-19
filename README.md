@@ -1,8 +1,9 @@
 # junjun
 
-## サロンストック（salon-stock/）
+## ツミケシ（salon-stock/）
 
-美容室・理容室のための、バーコードで数える棚卸アプリです。
+ツミケシ ― 理美容室の在庫と店販。罪庫を、在庫に。
+バーコードで数える棚卸アプリです（旧名：サロンストック）。
 
 - 公開アドレス：https://next05jhjun.github.io/junjun/salon-stock/
 - 使い方：https://next05jhjun.github.io/junjun/salon-stock/guide.html
@@ -14,6 +15,6 @@
 - 結果をExcel用のCSVに書き出し、帳簿との差・在庫金額を種類ごとに計算
 - 複数人のCSVをまとめて集計
 
-データは使っている端末のブラウザ内だけに保存されます。
+データはお店ごとのクラウド（Firebase）に保存され、オーナーとスタッフで共有します。
 
-※ 旧名「かんたん棚卸」（tanaoroshi/）は、サロンストックへ自動で移動します。
+※ 旧名「かんたん棚卸」（tanaoroshi/）は、ツミケシへ自動で移動します。
