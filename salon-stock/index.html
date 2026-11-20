@@ -196,7 +196,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
 </head>
 <body>
 <header>
-  <h1>ツミケシ <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 5.1</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
+  <h1>ツミケシ <small style="font-size:12px;font-weight:normal;color:var(--muted)">版 5.2</small><span class="salon-chip" id="salonChip" role="button" tabindex="0" aria-label="お店を切り替える" style="display:none"></span><a class="help" href="guide.html">？使い方</a></h1>
   <nav>
     <button data-tab="count" class="active">数える</button>
     <button data-tab="recv">入庫</button>
@@ -296,6 +296,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   <!-- 出庫 -->
   <section id="tab-out">
     <div class="card">
+      <div id="oEditBar" class="edit-bar" style="display:none"></div>
       <h2>出庫の種類</h2>
       <div class="cats" id="oType">
         <button type="button" data-otype="sale">🛍 店販（お客様に販売）</button>
@@ -2202,6 +2203,11 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     $('oType').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.otype === d.type));
     $('oCustWrap').style.visibility = sale ? 'visible' : 'hidden';
     $('oDiscBox').style.display = sale && d.lines.length ? '' : 'none';
+    const ed = d.editId && state.outs.find(o => o.id === d.editId);
+    if (d.editId && !ed) d.editId = '';
+    $('oEditBar').style.display = ed ? '' : 'none';
+    if (ed) $('oEditBar').innerHTML = `✏️ <b>${esc(md(ed.date))} ${ed.type === 'sale' ? '🛍 販売' : '✂️ 材料'}${ed.customer ? ' ' + esc(ed.customer) : ''}</b> の出庫を直しています。<div class="btns"><button class="btn" id="oEditCancel">直すのをやめる</button></div>`;
+    $('oSave').textContent = ed ? '直した内容で保存' : '記録する';
     if (document.activeElement !== $('oDisc')) $('oDisc').value = d.disc ? d.disc : '';
     $('custList').innerHTML = uniq(state.outs.map(o => o.customer).filter(Boolean)).map(x => `<option value="${esc(x)}">`).join('');
     if (!d.lines.length) {
@@ -2228,11 +2234,17 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     const lowBefore = new Set(lowItems().map(t => t.code));
     const o = { id: 'o' + Date.now().toString(36), date: d.date || today(), type: d.type === 'use' ? 'use' : 'sale', customer: d.type === 'use' ? '' : (d.customer || '').trim(),
       lines: d.lines.map(l => ({ code: l.code, qty: Number(l.qty) || 0, sell: l.sell === '' ? '' : Number(l.sell) })), disc: d.type === 'use' ? 0 : (Number(d.disc) || 0), created: Date.now() };
+    const old = d.editId && state.outs.find(x => x.id === d.editId);
+    if (old) { // 直す：元の出庫を消して、直した内容を新しく保存する（期間の判定は元の記録時刻のまま）
+      o.created = old.created;
+      state.outs = state.outs.filter(x => x.id !== old.id);
+      cloudHook('outDel', old.id);
+    }
     state.outs.push(o);
     cloudHook('out', o);
     state.oDraft = { date: today(), type: o.type, customer: '', lines: [] };
     save(); renderOut();
-    toast(o.type === 'sale' ? `販売を記録しました（${yen(outAmount(o))}＋税）` : '材料の使用を記録しました');
+    toast(old ? '出庫を直しました' : o.type === 'sale' ? `販売を記録しました（${yen(outAmount(o))}＋税）` : '材料の使用を記録しました');
     const crossed = lowItems().filter(t => !lowBefore.has(t.code)); // この出庫で発注点を切った商品
     if (crossed.length) showLowBar(crossed);
   });
@@ -2282,14 +2294,34 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     $('oHistory').innerHTML = list.map(o => `
       <details class="rename"><summary>${esc(md(o.date))}　${o.type === 'sale' ? '🛍 販売' : '✂️ 材料'}　${o.customer ? esc(o.customer) + '　' : ''}${o.lines.length}品目${o.type === 'sale' ? '　' + yen(outAmount(o)) + (o.disc ? `（${o.disc > 0 ? '値引き' : '調整'} ${yen(Math.abs(o.disc))}）` : '') : ''}${lc && o.created <= lc.at ? '　<span class="muted">確定済み</span>' : ''}</summary>
         <div class="table-wrap"><table>${o.lines.map(l => `<tr><td>${esc(nameOf(l.code))}</td><td class="num">${l.qty}</td>${o.type === 'sale' ? `<td class="num">${l.sell === '' ? '-' : yen(l.sell)}</td>` : ''}</tr>`).join('')}</table></div>
-        <div class="btns"><button class="btn danger" data-ocdel="${esc(o.id)}">この出庫を削除</button></div>
+        ${canEditRecv(o) ? `<div class="btns"><button class="btn" data-ocedit="${esc(o.id)}">✏️ 直す</button><button class="btn danger" data-ocdel="${esc(o.id)}">この出庫を削除</button></div>`
+          : '<p class="muted">ほかの人の記録です（直す・削除はオーナーか「全部」の権限の人ができます）</p>'}
       </details>`).join('');
   }
+  $('oHistory').addEventListener('click', e => {
+    const eid = e.target.dataset.ocedit; if (eid === undefined) return;
+    const o = state.outs.find(x => x.id === eid); if (!o) return;
+    const d = state.oDraft;
+    if (d.lines.length && !d.editId && !confirm('入力中の出庫があります。消して、この出庫を直しますか？')) return;
+    if (lastClose() && o.created <= lastClose().at && !confirm('この出庫は棚卸の確定より前のものです。直すと、確定したときの数字とずれることがあります。直しますか？')) return;
+    state.oDraft = { date: o.date, type: o.type, customer: o.customer || '', disc: Number(o.disc) || 0, editId: o.id,
+      lines: o.lines.map(l => ({ code: l.code, qty: l.qty, sell: l.sell })) };
+    save(); renderOut();
+    $('oEditBar').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    toast('上の欄で直して「直した内容で保存」を押してください');
+  });
+  $('oEditBar').addEventListener('click', e => {
+    if (e.target.id !== 'oEditCancel') return;
+    state.oDraft = { date: today(), type: state.oDraft.type, customer: '', lines: [] }; save(); renderOut();
+    toast('直すのをやめました（元のままです）');
+  });
   $('oHistory').addEventListener('click', e => {
     const id = e.target.dataset.ocdel; if (id === undefined) return;
     const o = state.outs.find(x => x.id === id); if (!o) return;
     if (!confirm(`${md(o.date)} の出庫を削除しますか？`)) return;
-    state.outs = state.outs.filter(x => x.id !== id); save(); cloudHook('outDel', id); renderOut();
+    state.outs = state.outs.filter(x => x.id !== id);
+    if (state.oDraft.editId === id) state.oDraft = { date: today(), type: state.oDraft.type, customer: '', lines: [] };
+    save(); cloudHook('outDel', id); renderOut();
   });
 
   // ========== 販売単価（店販の売価） ==========
@@ -2921,7 +2953,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
         // 単価が入っていない入庫（記録だけのスタッフが入れたもの）は、登録済みの仕入単価で計算する
         return { id: e.id, date: e.date, supplier: e.supplier || '', slip: e.slip || '', lines: (e.lines || []).map(l => ({ code: l.c, qty: l.q, price: p[l.c] ?? ((cc.costs[l.c] || {}).price || '') })), photo: photoOf[e.id] || '', created: e.ts, by: e.by || '' };
       });
-      state.outs = evs.filter(e => e.kind === 'out').map(e => ({ id: e.id, date: e.date, type: e.type, customer: e.customer || '', lines: (e.lines || []).map(l => ({ code: l.c, qty: l.q, sell: l.s ?? '' })), disc: Number(e.disc) || 0, created: e.ts }));
+      state.outs = evs.filter(e => e.kind === 'out').map(e => ({ id: e.id, date: e.date, type: e.type, customer: e.customer || '', lines: (e.lines || []).map(l => ({ code: l.c, qty: l.q, sell: l.s ?? '' })), disc: Number(e.disc) || 0, created: e.ts, by: e.by || '' }));
       const st = cc.settings.main || {};
       if (money()) { state.suppliers = st.suppliers || {}; state.sales = st.sales || ''; state.monthSales = st.monthSales || {}; }
       save();
