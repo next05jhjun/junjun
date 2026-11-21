@@ -130,8 +130,10 @@ service cloud.firestore {
         allow create: if isMember(s)
           && request.resource.data.by == request.auth.uid
           && request.resource.data.recipe is string && request.resource.data.recipe.size() <= 20000;
-        allow update: if isMember(s) && onlyChanges(['fb', 'fbAt', 'at'])
-          && request.resource.data.fb in ['', 'thin', 'ok', 'thick'];
+        // 「薄かった／ちょうど／濃かった」と自由メモ（色が暗かった など）だけ書き換えられる
+        allow update: if isMember(s) && onlyChanges(['fb', 'fbAt', 'memo', 'memoAt', 'at'])
+          && request.resource.data.fb in ['', 'thin', 'ok', 'thick']
+          && (!('memo' in request.resource.data) || (request.resource.data.memo is string && request.resource.data.memo.size() <= 1000));
       }
     }
 

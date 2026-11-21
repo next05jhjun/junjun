@@ -82,6 +82,8 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   .spinner { display: inline-block; width: 18px; height: 18px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: sp 0.8s linear infinite; vertical-align: middle; }
   @keyframes sp { to { transform: rotate(360deg); } }
   details summary { cursor: pointer; font-weight: bold; font-size: 14px; padding: 4px 0; }
+  details.memo { margin-top: 8px; }
+  details.memo summary { font-weight: normal; color: var(--muted); }
   .hide { display: none !important; }
 </style>
 </head>
@@ -159,6 +161,13 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     <!-- ③ 一言 -->
     <section class="card">
       <h2><span class="num">3</span>お客様のこと・一言</h2>
+      <label class="f">メニュー</label>
+      <div class="seg" id="menuSeg">
+        <button type="button" data-menu="full" class="on">全体染め</button>
+        <button type="button" data-menu="retouch">リタッチ（根元だけ）</button>
+        <button type="button" data-menu="retouchLight">リタッチ＋毛先を軽く</button>
+      </div>
+      <p id="menuHint" class="muted small hide">リタッチは「なりたい色」の写真がなくてもOK（今の毛先の色に根元を合わせます）。今の髪は<b>根元の伸びた部分がはっきり写る</b>ように撮ってください。</p>
       <label class="f">使う系統</label>
       <div class="seg" id="lineSeg">
         <button type="button" data-line="any" class="on">おまかせ</button>
@@ -186,7 +195,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
         <button type="button">もう少し明るめ</button>
         <button type="button">赤みを抑えたい</button>
         <button type="button">色持ちを良くしたい</button>
-        <button type="button">根元だけ</button>
+        <button type="button">白髪をしっかり</button>
       </div>
       <button id="go" class="btn primary big" type="button" style="margin-top:14px">✨ レシピを出す</button>
       <p id="goMsg" class="small"></p>
@@ -359,6 +368,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       logs: async () => Object.values(db.logs).sort((a, b) => b.at - a.at).slice(0, 40),
       addLog: async (l) => { const id = 'L' + Date.now().toString(36); db.logs[id] = { ...l, id, at: Date.now() }; save(); return id; },
       setFb: async (id, fb) => { if (db.logs[id]) { db.logs[id].fb = fb; db.logs[id].fbAt = Date.now(); save(); } },
+      setMemo: async (id, memo) => { if (db.logs[id]) { db.logs[id].memo = memo; db.logs[id].memoAt = Date.now(); save(); } },
     };
   })();
   const CloudDB = {
@@ -372,6 +382,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     },
     addLog: async (l) => { const id = 'L' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); await setDoc(`salons/${salon}/colorLogs/${id}`, { ...l, by: user.uid, at: new Date() }); return id; },
     setFb: async (id, fb) => { await setDoc(`salons/${salon}/colorLogs/${id}`, { fb, fbAt: new Date(), at: new Date() }, ['fb', 'fbAt', 'at']); },
+    setMemo: async (id, memo) => { await setDoc(`salons/${salon}/colorLogs/${id}`, { memo, memoAt: new Date(), at: new Date() }, ['memo', 'memoAt', 'at']); },
   };
   const DB = DEMO ? DemoDB : CloudDB;
   if (DEMO) { user = { uid: 'demo', email: 'demo（練習）' }; $('demoBanner').classList.remove('hide'); }
@@ -382,7 +393,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
   let dyeEdits = {};   // colorDyes（直し・手で登録）
   let logs = [];
   const photos = { want: null, now: null }; // { media_type, data(base64), url }
-  let line = 'any', gray = 'none';
+  let line = 'any', gray = 'none', menu = 'full';
   const hist = new Set();
   let current = null; // 今出ているレシピ { id, recipe }
 
@@ -514,6 +525,7 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     $(id).querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); set(b);
   });
   seg('lineSeg', b => { line = b.dataset.line; });
+  seg('menuSeg', b => { menu = b.dataset.menu; $('menuHint').classList.toggle('hide', menu === 'full'); $('phWant').querySelector('.muted').textContent = menu === 'full' ? 'スクショでOK' : 'なくてもOK'; });
   seg('graySeg', b => { gray = b.dataset.gray; });
   $('histChips').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; hist.has(b.dataset.h) ? hist.delete(b.dataset.h) : hist.add(b.dataset.h); b.classList.toggle('on'); b.style.outline = hist.has(b.dataset.h) ? '2px solid var(--accent)' : ''; });
   $('noteChips').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; const n = $('note'); n.value = (n.value.trim() ? n.value.trim() + '／' : '') + b.textContent; });
@@ -527,15 +539,37 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     return r;
   }
 
+  const MENU_JA = { full: '全体染め', retouch: 'リタッチ', retouchLight: 'リタッチ＋毛先' };
+  const MENU_AI = {
+    retouch: '【メニュー：リタッチ】根元の新しく伸びた部分だけ塗る。毛先は塗らない（ends は mix を空・minutes 0）。仕上がりは今の毛先の色に根元を合わせる。',
+    retouchLight: '【メニュー：リタッチ＋毛先を軽く】根元を塗り、流す前の5〜10分だけ毛先に低いオキシの薄めの色を通して色味をそろえる。毛先を明るくしない。',
+  };
+  // 最近のメモ（同じ系統）を短くAIに伝える
+  function recentMemos() {
+    const g = line === 'any' ? null : group(line);
+    return logs.filter(l => l.memo && (!g || group(l.line) === g)).slice(0, 3)
+      .map(l => `${{ thin: '薄かった', ok: 'ちょうど', thick: '濃かった' }[l.fb] || ''}${l.fb ? '：' : ''}${String(l.memo).replace(/\s+/g, ' ').slice(0, 40)}`);
+  }
+  function buildNote(userNote) {
+    const parts = [];
+    if (MENU_AI[menu]) parts.push(MENU_AI[menu]);
+    if (!photos.want) parts.push('なりたい色の写真なし（1枚目も今の髪）。');
+    parts.push(userNote || 'なし');
+    const m = recentMemos(); if (m.length) parts.push('【店のメモ（最近）】' + m.join('／'));
+    return parts.join(' ').slice(0, 300);
+  }
+
   // ==================== ④ レシピを出す ====================
   const aiUrl = () => (ls.get('color-recipe-ai', '') || DEFAULT_AI_URL).trim();
   $('go').addEventListener('click', async () => {
     const msg = $('goMsg'); msg.className = 'small bad';
-    if (!photos.want || !photos.now) { msg.textContent = '写真を2枚（なりたい色・今の髪）入れてください'; return; }
+    if (!photos.now) { msg.textContent = '「今の髪」の写真を入れてください'; return; }
+    if (!photos.want && menu === 'full') { msg.textContent = '写真を2枚（なりたい色・今の髪）入れてください（リタッチなら「今の髪」だけでOK）'; return; }
     const dyes = allDyes().filter(d => d.use && d.kind !== 'other' && (line === 'any' || d.kind === line || d.kind === 'oxy' || d.kind === 'bleach'));
     if (!dyes.some(d => ['normal', 'nd', 'mairy'].includes(d.kind))) { msg.textContent = 'この系統で使える1剤がありません。①の薬剤を確認してください'; return; }
-    const body = { salon, line, gray, history: [...hist].join('、') || 'なし', note: $('note').value.trim().slice(0, 300), bias: biasFor(line),
-      dyes: dyes.map(d => ({ id: d.id, name: d.name, kind: d.kind })), images: [photos.want, photos.now].map(p => ({ media_type: p.media_type, data: p.data })) };
+    const userNote = $('note').value.trim();
+    const body = { salon, line, gray, history: [...hist].join('、') || 'なし', note: buildNote(userNote), bias: biasFor(line),
+      dyes: dyes.map(d => ({ id: d.id, name: d.name, kind: d.kind })), images: [photos.want || photos.now, photos.now].map(p => ({ media_type: p.media_type, data: p.data })) };
     const btn = $('go'); btn.disabled = true; msg.className = 'small muted'; msg.innerHTML = '<span class="spinner"></span> AIが写真を見ています…（10〜30秒）';
     try {
       let recipe;
@@ -548,9 +582,10 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
         recipe = j.recipe;
       }
       const known = new Set(body.dyes.map(d => d.id));
-      const log = { line: recipe.line || line, req: { line, gray, history: body.history, note: body.note }, recipe: JSON.stringify(recipe).slice(0, 20000), fb: '' };
+      if (menu === 'retouch') { recipe.endsSameAsRoot = false; recipe.ends = { mix: [], oxyPercent: 0, oxyRatio: '', minutes: 0, note: '' }; } // リタッチは毛先を塗らない
+      const log = { line: recipe.line || line, req: { menu, line, gray, history: body.history, note: userNote.slice(0, 300) }, recipe: JSON.stringify(recipe).slice(0, 20000), fb: '', memo: '' };
       let id = ''; try { id = await DB.addLog(log); } catch (e) { toast('レシピの保存ができませんでした：' + e.message); }
-      current = { id, recipe, known };
+      current = { id, recipe, known, menu };
       if (id) { logs.unshift({ ...log, id, at: Date.now(), by: user.uid }); renderLogs(); }
       renderResult(); msg.textContent = '';
       $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -569,18 +604,19 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       ${s.note ? `<p class="small">${esc(noId(s.note))}</p>` : ''}`;
   }
   function renderResult() {
-    const { recipe: r, known, id } = current; const el = $('result');
+    const { recipe: r, known, id, menu: mn } = current; const el = $('result');
     const log = logs.find(x => x.id === id);
-    el.innerHTML = `<h2><span class="num">4</span>レシピ <span class="tag">${esc(LINE_JA[r.line] || '')}</span> <span class="tag">確からしさ：${{ high: '高い', mid: 'ふつう', low: '低い' }[r.confidence] || '-'}</span></h2>
+    el.innerHTML = `<h2><span class="num">4</span>レシピ <span class="tag">${esc(MENU_JA[mn] || '')}</span> <span class="tag">${esc(LINE_JA[r.line] || '')}</span> <span class="tag">確からしさ：${{ high: '高い', mid: 'ふつう', low: '低い' }[r.confidence] || '-'}</span></h2>
       <div class="kv"><b>今の髪</b><span>${esc(r.current)}</span><b>なりたい色</b><span>${esc(r.target)}</span></div>
       <p>${esc(noId(r.plan))}</p>
       ${stepHtml(r.endsSameAsRoot ? '根元〜毛先（全体）' : '根元', r.root, known)}
-      ${r.endsSameAsRoot ? '' : stepHtml('毛先', r.ends, known)}
+      ${r.endsSameAsRoot ? '' : (r.ends && (r.ends.mix || []).length ? stepHtml(mn === 'retouchLight' ? '毛先（最後に軽く）' : '毛先', r.ends, known) : '<h3>毛先</h3><p>塗らない（リタッチ）</p>')}
       ${(r.warnings || []).length ? `<h3>気をつけること</h3><ul>${r.warnings.map(w => `<li class="warn">${esc(noId(w))}</li>`).join('')}</ul>` : ''}
       <div class="safety">⚠️ これはAIの提案です。<b>最終判断は美容師</b>がしてください。<br>カラーの前に、毎回<b>パッチテスト（皮膚アレルギー試験）</b>を行ってください。ノンジアミンでもかぶれることがあります。</div>
       <h3>使ってみてどうだった？</h3>
       <p class="muted small">押すと、この店の次のレシピから自動で補正します。あとからでも押せます（下の「これまでのレシピ」）。</p>
-      <div class="fb" data-fbfor="${esc(id)}">${fbButtons(log && log.fb)}</div>`;
+      <div class="fb" data-fbfor="${esc(id)}">${fbButtons(log && log.fb)}</div>
+      ${memoBox(id, log && log.memo, true)}`;
     el.classList.remove('hide');
   }
   const fbButtons = (cur) => [['thin', '薄かった'], ['ok', 'ちょうど'], ['thick', '濃かった']].map(([k, v]) => `<button type="button" data-fb="${k}" class="${cur === k ? 'on' : ''}">${v}</button>`).join('');
@@ -593,6 +629,27 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
     catch (x) { toast('保存できませんでした：' + x.message); }
   });
 
+  // 自由メモ（色が暗かった・放置を5分のばした など）
+  function memoBox(id, memo, open) {
+    if (!id) return '';
+    return `<details class="memo"${open || memo ? ' open' : ''}><summary>📝 メモ${memo ? '' : '（色が暗かった・放置をのばした など自由に）'}</summary>
+      <textarea data-memofor="${esc(id)}" maxlength="1000" placeholder="例：思ったより暗かった。次は1レベル明るめ／毛先だけ赤みが出た／放置を5分のばした">${esc(memo || '')}</textarea>
+      <div class="row" style="margin-top:6px"><button type="button" class="btn" data-memosave="${esc(id)}" style="flex:0 0 auto">メモを保存</button><span class="muted small" data-memomsg="${esc(id)}"></span></div></details>`;
+  }
+  document.addEventListener('click', async e => {
+    const b = e.target.closest('[data-memosave]'); if (!b) return;
+    const id = b.dataset.memosave, ta = document.querySelector(`textarea[data-memofor="${CSS.escape(id)}"]`);
+    const memo = (ta.value || '').trim().slice(0, 1000), log = logs.find(x => x.id === id);
+    b.disabled = true;
+    try {
+      await DB.setMemo(id, memo); if (log) log.memo = memo;
+      document.querySelectorAll(`textarea[data-memofor="${CSS.escape(id)}"]`).forEach(x => { if (x !== ta) x.value = memo; });
+      document.querySelectorAll(`[data-memomsg="${CSS.escape(id)}"]`).forEach(x => { x.textContent = '保存しました'; });
+      toast(memo ? 'メモを保存しました' : 'メモを消しました');
+    } catch (x) { toast('保存できませんでした：' + x.message); }
+    finally { b.disabled = false; }
+  });
+
   // ==================== これまで ====================
   function renderLogs() {
     const b = biasFor('normal'), n = biasFor('nd');
@@ -603,9 +660,10 @@ if (/ Line\//.test(navigator.userAgent) && !/openExternalBrowser=1/.test(locatio
       let r = {}; try { r = JSON.parse(l.recipe || '{}'); } catch (e) {}
       const d = new Date(l.at || 0);
       const mix = r.root && r.root.mix ? r.root.mix.map(m => `${m.name} ${m.grams}g`).join(' ＋ ') : '';
-      return `<div class="log"><div><b>${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}</b> <span class="tag">${esc(LINE_JA[l.line] || '')}</span> ${esc(r.target || '')}</div>
+      return `<div class="log"><div><b>${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}</b> ${l.req && MENU_JA[l.req.menu] && l.req.menu !== 'full' ? `<span class="tag">${esc(MENU_JA[l.req.menu])}</span> ` : ''}<span class="tag">${esc(LINE_JA[l.line] || '')}</span> ${esc(r.target || '')}</div>
         <div class="muted small">${esc(mix)}${r.root ? `（${esc(r.root.oxyPercent)}%・${esc(r.root.minutes)}分）` : ''}${l.req && l.req.note ? '／一言：' + esc(l.req.note) : ''}</div>
-        <div class="fb" data-fbfor="${esc(l.id)}">${fbButtons(l.fb)}</div></div>`;
+        <div class="fb" data-fbfor="${esc(l.id)}">${fbButtons(l.fb)}</div>
+        ${memoBox(l.id, l.memo, false)}</div>`;
     }).join('');
   }
 
